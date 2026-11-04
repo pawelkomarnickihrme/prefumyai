@@ -134,6 +134,16 @@ kwoty w USD. Skrypt przesyla do AI Gateway nazwe, marke, liczbe ocen, skrocony o
 (do 3000 znakow), podobnych reprezentantow oraz opcjonalne dane dostepnosci.
 Nie wysyla pelnych recenzji ani calego JSON-a.
 
+## Katalog asystenta
+
+```bash
+pnpm run catalog
+```
+
+Buduje katalog z kopii opisanej w `dane/snapshot-robocza.json`, bez wywolan AI.
+Sprawdza hash kopii, a nuty mapuje przez `dane/nuty.json`. Wynik trafia do
+`wyniki/katalog/<id>/`: `katalog.json`, `odniesienia.json` i `raport.json`.
+
 ## Testy
 
 ```bash

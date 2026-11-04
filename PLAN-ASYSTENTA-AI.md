@@ -118,7 +118,14 @@ Bazę danych dodajemy dopiero wtedy, gdy pojawią się konta albo trzeba będzie
 
 ### Wzbogacanie katalogu
 
-Jednorazowe przetwarzanie przez model, oparte na nutach, opisie i recenzjach. Najpierw próba na ok. 200 zapachach, sprawdzona ręcznie, a dopiero potem cały katalog.
+Jednorazowe przetwarzanie przez modele, oparte na nutach, opisie i recenzjach. Próbę na 200 zapachach zweryfikowano automatycznie (stabilność, zgodność z danymi społeczności, przegląd próbki przez Claude'a), bez ręcznej kontroli właściciela projektu. Cały katalog wzbogacamy dopiero po zakończeniu selekcji, żeby nie płacić dwa razy.
+
+Wybrany układ, w dwóch krokach:
+
+- `typesafe-ai/jev` ocenia skale, segment cenowy i tagi, każdy tag osobnym pytaniem tak/nie.
+- `deepseek/deepseek-v4-flash` bez rozumowania pisze profile po angielsku i polsku.
+
+Układ zastąpił `deepseek-v4.1-flash`: jest tańszy, a tagi są znacznie lepiej poparte nutami. Tagi pozostają miękkim sygnałem, bo część z nich, np. `clean`, nie ma prostego powiązania z nutami.
 
 Dodaje, jako dane wyraźnie oddzielone od źródłowych:
 
@@ -191,7 +198,7 @@ Serwer sprawdza, czy identyfikatory są na liście kandydatów, i pobiera dane k
 
 ### Modele
 
-Modele do wzbogacania i rozmowy wybieramy osobno, porównując jakość, koszt i czas odpowiedzi na scenariuszach z Etapu 4. Nie zakładamy z góry użycia modelu Jev z selekcji.
+Do wzbogacania używamy Jev i DeepSeeka (sekcja „Wzbogacanie katalogu”). Model do rozmowy wybieramy, porównując jakość, koszt i czas odpowiedzi na scenariuszach z Etapu 4.
 
 ## 5. Zasady wiarygodności
 
@@ -210,17 +217,22 @@ Modele do wzbogacania i rozmowy wybieramy osobno, porównując jakość, koszt i
 
 ### Etap 0 — dane
 
-- Selekcji na razie nie wznawiamy (płatne wywołania). Wracamy do tej decyzji po próbie wzbogacania.
+- Selekcja działa ponownie w osobnym przebiegu `wyniki/2026-11-04T18-58-20-210Z-57736`. Kopia robocza go nie obejmuje, więc po zakończeniu powstanie nowa kopia i nowy manifest.
 - Repozytorium git i zamrożona kopia robocza obecnych wyników: `wyniki/snapshoty/robocza-2026-11-04`, opisana w `dane/snapshot-robocza.json`.
 - Katalog dla testerów dopiero po zakończeniu selekcji i przejrzeniu próbki grupowania.
 
 ### Etap 1 — katalog
 
-- Walidacja, stabilne identyfikatory, normalizacja nut i słownik PL/EN.
+Część bez płatnych wywołań jest wdrożona dla kopii roboczej (`pnpm run catalog`):
+
+- Walidacja, stabilne identyfikatory, normalizacja nut i słownik PL/EN w `dane/nuty.json`.
 - Indeks odniesień.
-- Wzbogacanie: próba na ok. 200 zapachach, ręczna kontrola, potem cały katalog.
-- Tłumaczenia nut, zalet i wad.
 - Raport braków i niejednoznacznych wariantów.
+
+Do zrobienia (płatne wywołania):
+
+- Wzbogacanie całego katalogu, po zakończeniu selekcji (próba na 200 zapachach wykonana: `pnpm run enrich`).
+- Tłumaczenia zalet, wad i nut spoza słownika.
 
 ### Etap 2 — silnik doboru
 
