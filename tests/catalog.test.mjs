@@ -27,7 +27,7 @@ test('notes with similar words stay separate', () => {
   assert.equal(mapNote('Brazilian Rosewood', dictionary).id, 'rosewood');
   assert.equal(mapNote('Rock Rose', dictionary).id, 'labdanum');
   assert.equal(mapNote('Orange Blossom', dictionary).id, 'orange-blossom');
-  assert.equal(mapNote('Lime (Linden) Blossom', dictionary).mapped, false);
+  assert.equal(mapNote('Lime (Linden) Blossom', dictionary).id, 'linden');
 });
 
 test('unknown note is reported as unmapped instead of guessed', () => {

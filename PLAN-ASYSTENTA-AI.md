@@ -8,19 +8,18 @@ Doradca perfumowy w formie czatu, który odpowiada krótkim tekstem i interaktyw
 
 Projekt zawiera skrypt preselekcji perfum, a nie aplikację webową. Jego wyniki można wykorzystać jako katalog asystenta.
 
-### Stan selekcji (odczyt z 4 listopada 2026 r.)
+### Stan selekcji (4 listopada 2026 r.)
 
-Przebieg `wyniki/2026-11-04T18-20-30-752Z-54970` **zatrzymał się na błędzie**, a nie zakończył. `raporty/blad.json` podaje: `The operation was aborted due to timeout`. Brak `podsumowanie.json`.
+Selekcja jest zakończona (`complete: true`). Dane są zamrożone w `wyniki/snapshoty/pelna-2026-11-04` i opisane w `dane/snapshot.json`.
 
 | Wynik | Liczba |
 |---|---|
-| Kandydaci do przetworzenia (`ratingCount >= 200`) | 12 301 |
-| Przetworzeni | ok. 4764 (39%) |
-| `wybrane` | 3202 |
-| `do-weryfikacji` | 698 |
-| Odrzucone warianty mniej popularne | 863 |
-
-Selekcja idzie od najpopularniejszych zapachów. Według README ponowienie identycznej komendy wznawia pracę z cache, ale pozostałe decyzje to płatne wywołania.
+| Kandydaci przetworzeni (`ratingCount >= 200`) | 12 301 |
+| `wybrane`, czyli katalog | 8706 |
+| Zapachy do polecania (z nutami) | 6537 |
+| Zapachy z ocenami i profilem | 6532 |
+| `do-weryfikacji`, poza katalogiem | 1854 |
+| Warianty scalone z reprezentantem | 1741 |
 
 ### Dane i ich zastosowanie
 
@@ -36,12 +35,14 @@ Selekcja idzie od najpopularniejszych zapachów. Według README ponowienie ident
 
 ### Ograniczenia
 
-- Ok. 22% wybranych zapachów (708 z 3202) nie ma nut.
-- Część pól jest pusta. W próbce 2254 rekordów zalety i wady miało ok. 77%, a sezon i porę dnia ok. 60%.
+- 2169 z 8706 zapachów w katalogu (25%) nie ma nut.
+- Część pól jest pusta, w tym dane społeczności o trwałości i projekcji. Dotyczy to także popularnych zapachów, np. Sauvage.
 - Treści źródłowe są praktycznie w całości po angielsku.
 - Brak potwierdzonych cen i bieżącej dostępności sklepowej. `valueForMoney` to opinia o opłacalności, a nie cena.
 - Selekcja redukuje wersje jednej linii do reprezentanta. Sauvage Elixir, EDP i Parfum nie są w katalogu, a pachną inaczej niż Sauvage.
-- Pliki z `do-weryfikacji` nie trafiają automatycznie do katalogu produkcyjnego.
+- Pliki z `do-weryfikacji` nie trafiają automatycznie do katalogu produkcyjnego. 1830 z 1854 trafiło tam przez niepewne przypisanie do linii, więc część to realnie osobne zapachy. Wracamy do nich po pierwszych testach.
+- Grupowanie jest niedoskonałe: część wariantów scalono zbyt mocno (np. Just Rock! for Him i for Her), a część możliwych duplikatów została osobno.
+- Segment cenowy to szacunek modelu. Ponad 47% zapachów dostało `niche`, co wygląda na zawyżone, więc segment służy tylko jako miękki sygnał.
 - Zdjęcia są linkami do `fimgs.net`. Pochodzenie i prawa do zdjęć, opisów oraz recenzji nie są potwierdzone.
 
 ## 2. Przebieg rozmowy
@@ -118,7 +119,7 @@ Bazę danych dodajemy dopiero wtedy, gdy pojawią się konta albo trzeba będzie
 
 ### Wzbogacanie katalogu
 
-Jednorazowe przetwarzanie przez modele, oparte na nutach, opisie i recenzjach. Próbę na 200 zapachach zweryfikowano automatycznie (stabilność, zgodność z danymi społeczności, przegląd próbki przez Claude'a), bez ręcznej kontroli właściciela projektu. Cały katalog wzbogacamy dopiero po zakończeniu selekcji, żeby nie płacić dwa razy.
+Jednorazowe przetwarzanie przez modele, oparte na nutach, opisie i recenzjach. Próbę na 200 zapachach zweryfikowano automatycznie (stabilność, zgodność z danymi społeczności, przegląd próbki przez Claude'a), bez ręcznej kontroli właściciela projektu.
 
 Wybrany układ, w dwóch krokach:
 
@@ -215,30 +216,28 @@ Do wzbogacania używamy Jev i DeepSeeka (sekcja „Wzbogacanie katalogu”). Mod
 
 ## 6. Kolejność realizacji
 
-### Etap 0 — dane
+### Etap 0 — dane (wykonany)
 
-- Selekcja działa ponownie w osobnym przebiegu `wyniki/2026-11-04T18-58-20-210Z-57736`. Kopia robocza go nie obejmuje, więc po zakończeniu powstanie nowa kopia i nowy manifest.
-- Repozytorium git i zamrożona kopia robocza obecnych wyników: `wyniki/snapshoty/robocza-2026-11-04`, opisana w `dane/snapshot-robocza.json`.
-- Katalog dla testerów dopiero po zakończeniu selekcji i przejrzeniu próbki grupowania.
+- Repozytorium git, pełna zamrożona kopia danych i manifest `dane/snapshot.json`.
+- Przegląd próbki grupowania wykonany automatycznie i przez Claude'a.
 
 ### Etap 1 — katalog
 
-Część bez płatnych wywołań jest wdrożona dla kopii roboczej (`pnpm run catalog`):
+Wykonane:
 
-- Walidacja, stabilne identyfikatory, normalizacja nut i słownik PL/EN w `dane/nuty.json`.
-- Indeks odniesień.
-- Raport braków i niejednoznacznych wariantów.
+- Walidacja, stabilne identyfikatory, normalizacja nut i słownik PL/EN w `dane/nuty.json` (`pnpm run catalog`).
+- Indeks odniesień oraz raport braków i niejednoznacznych wariantów.
+- Wzbogacanie 6532 z 6537 zapachów do polecania (`pnpm run enrich`, koszt ok. 1,74 USD) i scalenie (`pnpm run merge`).
 
 Do zrobienia (płatne wywołania):
 
-- Wzbogacanie całego katalogu, po zakończeniu selekcji (próba na 200 zapachach wykonana: `pnpm run enrich`).
 - Tłumaczenia zalet, wad i nut spoza słownika.
 
-### Etap 2 — silnik doboru
+### Etap 2 — silnik doboru (wykonany)
 
-- Operacje na preferencjach i wykluczenia.
-- Dopasowanie, podobieństwo, zawężanie kandydatów, ranking i uzasadnienia.
-- Deterministyczne testy bez płatnych wywołań modeli.
+- `src/engine.mjs`: operacje na preferencjach, wykluczenia, dopasowanie, podobieństwo, zawężanie kandydatów, ranking, uzasadnienia, porównanie i akcje przycisków.
+- Deterministyczne testy bez płatnych wywołań modeli (`pnpm test`).
+- Znane słabości do sprawdzenia w Etapie 4: odniesienia do wariantów, np. Sauvage Elixir, oraz trafność samych tagów.
 
 ### Etap 3 — czat i UI
 

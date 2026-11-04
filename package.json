@@ -10,7 +10,8 @@
     "select": "node --env-file-if-exists=.env scripts/select-perfumes.mjs --apply",
     "test": "node --test tests/*.test.mjs",
     "catalog": "node scripts/build-catalog.mjs",
-    "enrich": "node --env-file-if-exists=.env scripts/enrich.mjs"
+    "enrich": "node --env-file-if-exists=.env scripts/enrich.mjs",
+    "merge": "node scripts/merge-enrichment.mjs"
   },
   "dependencies": {
     "ai": "7.0.162"
