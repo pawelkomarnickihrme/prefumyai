@@ -140,7 +140,7 @@ Nie wysyla pelnych recenzji ani calego JSON-a.
 pnpm run catalog
 ```
 
-Buduje katalog z kopii opisanej w `dane/snapshot-robocza.json`, bez wywolan AI.
+Buduje katalog z kopii opisanej w `dane/snapshot.json`, bez wywolan AI.
 Sprawdza hash kopii, a nuty mapuje przez `dane/nuty.json`. Wynik trafia do
 `wyniki/katalog/<id>/`: `katalog.json`, `odniesienia.json` i `raport.json`.
 

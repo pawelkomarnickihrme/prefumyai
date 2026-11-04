@@ -6,7 +6,7 @@ import { buildCatalog } from './catalog.mjs';
 const root = new URL('..', import.meta.url).pathname;
 const { values } = parseArgs({
   options: {
-    manifest: { type: 'string', default: join(root, 'dane/snapshot-robocza.json') },
+    manifest: { type: 'string', default: join(root, 'dane/snapshot.json') },
     source: { type: 'string', default: '/Users/pawelkomarnicki/pro/normalizacja/perfumy_json' },
   },
   allowPositionals: true,
