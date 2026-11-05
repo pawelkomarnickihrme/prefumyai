@@ -114,3 +114,15 @@ export function pickSample(catalog, size, seed = 'proba-1') {
 
 export const costUsd = (usage, price) =>
   (usage.inputTokens ?? 0) * price.input + (usage.outputTokens ?? 0) * price.output;
+
+// The design forbids absolute promises. Inflected endings carry over, so grammar stays correct.
+export function softenClaims(text) {
+  const keepCase = (original, replacement) => (original[0] === original[0].toUpperCase()
+    ? replacement[0].toUpperCase() + replacement.slice(1) : replacement);
+  return text
+    .replace(/\b(idealnie|doskonale)\b/giu, m => keepCase(m, 'dobrze'))
+    .replace(/(?<![\p{L}])(?:idealn|doskonał)(y|a|e|ą|ym|ej|ymi|ych|ego|emu)(?![\p{L}])/giu, (m, ending) => keepCase(m, `dobr${ending}`))
+    .replace(/\ban (ideal)\b/gi, (m, word) => keepCase(m, 'a good'))
+    .replace(/\b(ideal|perfect)\b/gi, m => keepCase(m, 'good'))
+    .replace(/\bperfectly\b/gi, m => keepCase(m, 'well'));
+}

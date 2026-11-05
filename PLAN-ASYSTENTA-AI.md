@@ -238,12 +238,23 @@ Do zrobienia (płatne wywołania):
 - `src/engine.mjs`: operacje na preferencjach, wykluczenia, dopasowanie, podobieństwo, zawężanie kandydatów, ranking, uzasadnienia, porównanie i akcje przycisków.
 - Deterministyczne testy bez płatnych wywołań modeli (`pnpm test`).
 - Znane słabości do sprawdzenia w Etapie 4: odniesienia do wariantów, np. Sauvage Elixir, oraz trafność samych tagów.
+- Oryginalne wersje niektórych zapachów mogą nie istnieć w danych, np. Terre d'Hermès jest reprezentowany przez Parfum.
 
-### Etap 3 — czat i UI
+### Etap 3 — czat i UI (wykonany, poza tłumaczeniami)
 
-- Rozmowa po polsku i angielsku.
-- Karty, pytania z przyciskami, szczegóły i porównanie.
-- Stan preferencji utrzymywany w sesji.
+Interfejs według `deignaing.md`, uruchamiany przez `pnpm run dev`, wymaga `APP_PASSWORD`.
+
+- `app/`: ekran dostępu, rozmowa, „Twój kierunek”, karty, szczegóły, porównanie, brak wyników, błędy i ponowienie, PL/EN.
+- `src/assistant.mjs`: interpretacja, operacje, wybór spośród kandydatów i walidacja odpowiedzi modelu.
+- Model rozmowy: domyślnie `deepseek/deepseek-v4-flash`, zmiana przez `CHAT_MODEL`. Ostateczny wybór w Etapie 4.
+- Sprawdzone w przeglądarce na 1440, 375 i 320 px.
+
+Świadome uproszczenia:
+
+- Odpowiedzi nie są strumieniowane, status jest jeden i prawdziwy.
+- Zdjęcia są wyłączone (`SHOW_PRODUCT_IMAGES=0`), dopóki nie ustalimy, czy można ich użyć.
+- Brak limitu prób logowania i limitu zapytań, do dodania przed startem publicznym.
+- Katalog jest czytany z ignorowanego `wyniki/`, więc wdrożenie wymaga osobnej decyzji, skąd serwer ma go brać.
 
 ### Etap 4 — jakość
 

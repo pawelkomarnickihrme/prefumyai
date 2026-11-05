@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInput, costUsd, parseDecision, pickSample, QUESTIONS, TAGS, validateProfile } from '../scripts/enrichment.mjs';
+import { buildInput, costUsd, parseDecision, pickSample, QUESTIONS, softenClaims, TAGS, validateProfile } from '../scripts/enrichment.mjs';
 
 const answers = (overrides = {}) => ({
   freshness: { choice: 'level_4' }, sweetness: { choice: 'level_1' }, intensity: { choice: 'level_5' }, formality: { choice: 'level_3' },
@@ -61,4 +61,11 @@ test('input limits reviews and adds Polish note names', () => {
 
 test('cost uses token prices', () => {
   assert.equal(costUsd({ inputTokens: 10, outputTokens: 2 }, { input: 1, output: 5 }), 20);
+});
+
+test('absolute claims are softened with correct inflection', () => {
+  assert.equal(softenClaims('Idealny do biura, idealna na wieczór, doskonałe na lato.'), 'Dobry do biura, dobra na wieczór, dobre na lato.');
+  assert.equal(softenClaims('Pasuje idealnie i doskonale.'), 'Pasuje dobrze i dobrze.');
+  assert.equal(softenClaims('An ideal scent, perfect for work, perfectly balanced.'), 'A good scent, good for work, well balanced.');
+  assert.equal(softenClaims('Zapach idealistyczny'), 'Zapach idealistyczny');
 });

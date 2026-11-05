@@ -3,3 +3,6 @@ node_modules/
 .env.*
 !.env.example
 wyniki/
+.next/
+next-env.d.ts
+.agent*

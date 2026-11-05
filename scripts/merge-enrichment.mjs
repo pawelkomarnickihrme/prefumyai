@@ -1,6 +1,6 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { PROMPT_VERSION } from './enrichment.mjs';
+import { PROMPT_VERSION, softenClaims } from './enrichment.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const manifest = JSON.parse(await readFile(join(root, 'dane/snapshot.json'), 'utf8'));
@@ -11,7 +11,11 @@ const catalog = JSON.parse(await readFile(join(catalogDir, 'katalog.json'), 'utf
 const enrichment = new Map();
 for (const name of await readdir(enrichmentDir)) {
   const row = JSON.parse(await readFile(join(enrichmentDir, name), 'utf8'));
-  enrichment.set(row.id, row.enrichment);
+  enrichment.set(row.id, {
+    ...row.enrichment,
+    profileEn: softenClaims(row.enrichment.profileEn),
+    profilePl: softenClaims(row.enrichment.profilePl),
+  });
 }
 const merged = catalog.map(entry => (enrichment.has(entry.id) ? { ...entry, enrichment: enrichment.get(entry.id) } : entry));
 await writeFile(join(catalogDir, 'katalog-wzbogacony.json'), JSON.stringify(merged));

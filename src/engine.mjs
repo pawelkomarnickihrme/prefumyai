@@ -1,3 +1,4 @@
+import { PRICE_SEGMENTS, TAGS } from '../scripts/enrichment.mjs';
 import { normalize } from '../scripts/selection.mjs';
 
 export const SCALE_NAMES = ['freshness', 'sweetness', 'intensity', 'formality'];
@@ -104,12 +105,18 @@ export function createEngine({ catalog, references, dictionary }) {
   }
   const resolveNote = text => noteLookup.get(normalize(text)) ?? null;
   const knownNotes = new Set(noteLookup.values());
+  const knownFamilies = new Set(dictionary.map(n => n.family));
 
   // A misspelled exclusion must fail loudly: silently ignoring it would break "bez X".
   function apply(preferences, operation) {
     if (operation.op === 'add' && ['excludedNotes', 'likedNotes'].includes(operation.field) && !knownNotes.has(operation.value)) {
       throw new Error(`Nieznana nuta: ${operation.value}`);
     }
+    if (operation.op === 'add' && ['excludedFamilies', 'likedFamilies'].includes(operation.field) && !knownFamilies.has(operation.value)) {
+      throw new Error(`Nieznana rodzina: ${operation.value}`);
+    }
+    if (operation.op === 'add' && operation.field === 'likedTags' && !TAGS.includes(operation.value)) throw new Error(`Nieznany tag: ${operation.value}`);
+    if (operation.op === 'add' && operation.field === 'priceSegments' && !Object.hasOwn(PRICE_SEGMENTS, operation.value)) throw new Error(`Nieznany segment: ${operation.value}`);
     if (operation.op === 'addReference' && !referenceById.has(operation.id)) throw new Error(`Nieznany zapach: ${operation.id}`);
     if (operation.op === 'add' && operation.field === 'excludedPerfumes' && !byId.has(operation.value)) throw new Error(`Nieznany zapach: ${operation.value}`);
     return applyOperation(preferences, operation);
@@ -319,5 +326,28 @@ export function createEngine({ catalog, references, dictionary }) {
     return { op: 'setScale', scale, max: Math.max(1, lowest + direction) };
   }
 
-  return { apply, resolveNote, resolveReference, recommend, similar, compare, actionToOperation };
+  // The browser keeps preferences between requests, so they are replayed through the same checks.
+  function rehydrate(raw) {
+    let preferences = emptyPreferences();
+    const attempt = operation => {
+      try { preferences = apply(preferences, operation); } catch { /* Invalid input is dropped. */ }
+    };
+    for (const field of LIST_FIELDS) {
+      for (const value of Array.isArray(raw?.[field]) ? raw[field] : []) {
+        if (typeof value === 'string') attempt({ op: 'add', field, value });
+      }
+    }
+    for (const field of Object.keys(CHOICES)) if (raw?.[field]) attempt({ op: 'set', field, value: raw[field] });
+    for (const scale of SCALE_NAMES) if (raw?.scales?.[scale]) attempt({ op: 'setScale', scale, ...raw.scales[scale] });
+    for (const reference of Array.isArray(raw?.references) ? raw.references : []) {
+      attempt({ op: 'addReference', id: reference?.id, relation: reference?.relation, scale: reference?.scale ?? undefined });
+    }
+    return preferences;
+  }
+
+  return {
+    apply, rehydrate, resolveNote, resolveReference, recommend, similar, compare, actionToOperation,
+    getPerfume: id => byId.get(id) ?? null,
+    getReference: id => referenceById.get(id) ?? null,
+  };
 }
