@@ -2,7 +2,7 @@
 
 import { t } from '../src/i18n.mjs';
 
-export function Bottle({ language }) {
+function Bottle({ language }) {
   return (
     <div className="placeholder">
       <svg viewBox="0 0 48 72" width="40" height="60" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.25">
@@ -26,39 +26,45 @@ function Photo({ item, language }) {
   );
 }
 
-function CommunityRating({ item, language }) {
-  return <p className="meta">{item.rating.toLocaleString(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} / 5 · {item.ratingCount.toLocaleString(language)} {t(language, 'votes')} · {t(language, 'community').toLowerCase()}</p>;
-}
-
-function Recommendations({ block, language, api, compareIds }) {
+function Recommendations({ block, language, api, saved }) {
   return (
     <>
-      <ol className="cards">
-        {block.cards.map((card, index) => {
-          const selected = compareIds.includes(card.id);
+      <ul className="cards">
+        {block.cards.map(card => {
+          const favorite = saved.favorites.some(item => item.id === card.id);
+          const owned = saved.owned.some(item => item.id === card.id);
           return (
             <li className="card" key={card.id}>
               <Photo item={card} language={language} />
               <div className="card-body">
-                <p className="eyebrow">{t(language, 'proposal')} {index + 1} · {card.brand}</p>
-                <h3 className="perfume-name" lang="en">{card.name}</h3>
-                <CommunityRating item={card} language={language} />
+                <p className="perfume-brand" lang="en">{card.brand}</p>
+                {/* The button stretches over the whole card in CSS, so the card opens details by mouse and keyboard. */}
+                <h3 className="perfume-name" lang="en">
+                  <button type="button" className="card-open" aria-label={`${t(language, 'details')}: ${card.brand} ${card.name}`} onClick={() => api.openDetails(card)}>{card.name}</button>
+                </h3>
+                {card.facts?.length > 0 && (
+                  <dl className="card-facts">
+                    {card.facts.map(fact => (
+                      <div key={fact.label}><dt>{fact.label}</dt> <dd>{fact.value}</dd></div>
+                    ))}
+                  </dl>
+                )}
                 <h4>{t(language, 'whyFits')}</h4>
                 <p>{card.why}</p>
                 {card.tradeoff && (<><h4>{t(language, 'goodToKnow')}</h4><p>{card.tradeoff}</p></>)}
               </div>
               <div className="card-actions">
-                <button type="button" className="button" onClick={() => api.openDetails(card.id)}>{t(language, 'details')}</button>
-                <button type="button" className="button" aria-pressed={selected} onClick={() => api.toggleCompare(card.id, card.name)}>
-                  {t(language, selected ? 'removeCompare' : 'addCompare')}
+                <button type="button" className="button" aria-pressed={favorite} onClick={() => api.toggleSaved('favorites', card)}>
+                  {t(language, favorite ? 'removeFavorite' : 'addFavorite')}
                 </button>
-                <button type="button" className="link" onClick={() => api.send({ type: 'similar', perfumeId: card.id })}>{t(language, 'similar')}</button>
-                <button type="button" className="link" onClick={() => api.send({ type: 'action', action: 'known', perfumeId: card.id })}>{t(language, 'known')}</button>
+                <button type="button" className="button" aria-pressed={owned} onClick={() => api.toggleSaved('owned', card)}>
+                  {t(language, owned ? 'removeOwned' : 'addOwned')}
+                </button>
               </div>
             </li>
           );
         })}
-      </ol>
+      </ul>
       <p className="hint">{t(language, 'sampleHint')}</p>
     </>
   );
@@ -97,6 +103,7 @@ const listOrNoData = (list, language) => (list.length ? list.join(', ') : t(lang
 function Comparison({ block, language }) {
   const rows = [
     { label: t(language, 'character'), value: p => orNoData(p.profile, language) },
+    ...['topNotes', 'heartNotes', 'baseNotes'].map(key => ({ label: t(language, key), value: p => orNoData(p[key], language) })),
     { label: t(language, 'uniqueNotes'), value: p => listOrNoData(p.uniqueNotes, language) },
     ...block.perfumes[0].scales.map((scale, index) => ({
       label: scale.label,
@@ -105,6 +112,8 @@ function Comparison({ block, language }) {
     })),
     { label: t(language, 'longevity'), source: t(language, 'community'), value: p => orNoData(p.longevity, language) },
     { label: t(language, 'sillage'), source: t(language, 'community'), value: p => orNoData(p.sillage, language) },
+    { label: t(language, 'wearSeason'), source: t(language, 'community'), value: p => orNoData(p.season, language) },
+    { label: t(language, 'wearTime'), source: t(language, 'community'), value: p => orNoData(p.timeOfDay, language) },
   ];
   return (
     <section className="comparison" style={{ '--columns': block.perfumes.length }}>
@@ -117,7 +126,7 @@ function Comparison({ block, language }) {
           <dl className="criterion-values">
             {block.perfumes.map(perfume => (
               <div key={perfume.id}>
-                <dt lang="en">{perfume.name}</dt>
+                <dt lang="en"><strong>{perfume.brand}</strong> {perfume.name}</dt>
                 <dd>{row.value(perfume)}</dd>
               </div>
             ))}
@@ -128,63 +137,14 @@ function Comparison({ block, language }) {
   );
 }
 
-function SourceList({ title, items, language }) {
-  return (
-    <section>
-      <h3>{title}</h3>
-      {items.length ? (
-        <>
-          <ul lang="en">{items.map(item => <li key={item}>{item}</li>)}</ul>
-          {language !== 'en' && <p className="meta">{t(language, 'sourceLanguage')}</p>}
-        </>
-      ) : <p>{t(language, 'noData')}</p>}
-    </section>
-  );
-}
-
-export function DetailsContent({ block, language }) {
-  return (
-    <div className="details">
-      <Photo item={block} language={language} />
-      <p className="eyebrow">{block.brand}</p>
-      <h2 className="section-title" lang="en">{block.name}</h2>
-      <CommunityRating item={block} language={language} />
-      <section><h3>{t(language, 'profile')}</h3><p>{orNoData(block.profile, language)}</p></section>
-      <section>
-        <h3>{t(language, 'topNotes')}</h3><p>{listOrNoData(block.notes.top, language)}</p>
-        <h3>{t(language, 'heartNotes')}</h3><p>{listOrNoData(block.notes.heart, language)}</p>
-        <h3>{t(language, 'baseNotes')}</h3><p>{listOrNoData(block.notes.base, language)}</p>
-      </section>
-      <section>
-        <h3>{t(language, 'estimated')}</h3>
-        <dl className="facts">
-          {block.scales.map(scale => (
-            <div key={scale.label}><dt>{scale.label}</dt><dd>{scale.value === null ? t(language, 'noData') : `${scale.value} ${t(language, 'outOf')}`}</dd></div>
-          ))}
-          <div><dt>{t(language, 'priceSegment')}</dt><dd>{orNoData(block.priceSegment, language)}</dd></div>
-        </dl>
-      </section>
-      <section>
-        <h3>{t(language, 'community')}</h3>
-        <dl className="facts">
-          <div><dt>{t(language, 'longevity')}</dt><dd>{orNoData(block.community.longevity, language)}</dd></div>
-          <div><dt>{t(language, 'sillage')}</dt><dd>{orNoData(block.community.sillage, language)}</dd></div>
-        </dl>
-      </section>
-      <SourceList title={t(language, 'pros')} items={block.pros} language={language} />
-      <SourceList title={t(language, 'cons')} items={block.cons} language={language} />
-    </div>
-  );
-}
-
 // A closed set of components: anything else from the server renders nothing.
-export function Block({ block, language, api, compareIds }) {
+export function Block({ block, language, api, saved }) {
   switch (block.type) {
-    case 'recommendations': return <Recommendations block={block} language={language} api={api} compareIds={compareIds} />;
+    case 'recommendations': return <Recommendations block={block} language={language} api={api} saved={saved} />;
     case 'question': return <Question block={block} api={api} />;
     case 'noMatch': return <NoMatch block={block} language={language} api={api} />;
     case 'comparison': return <Comparison block={block} language={language} />;
-    case 'details': return <div className="inline-details"><DetailsContent block={block} language={language} /></div>;
+    case 'comment': return <p className="comment">{block.text}</p>;
     default: return null;
   }
 }

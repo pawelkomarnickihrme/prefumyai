@@ -3,6 +3,32 @@ import assert from 'node:assert/strict';
 import { createAssistant, singleBound } from '../src/assistant.mjs';
 import { checkPassword, isValidSession, sessionToken } from '../src/auth.mjs';
 import { createEngine, emptyPreferences } from '../src/engine.mjs';
+import { interactionRow, saveInteraction } from '../src/interactions.mjs';
+
+test('an interaction row keeps the turn and drops what the browser should not control', () => {
+  const sessionId = '6f1c2b1e-8a57-4c1a-9d3e-0123456789ab';
+  const row = interactionRow(
+    { type: 'message', text: ` ${'x'.repeat(2000)} `, sessionId, history: ['secret'], preferences: { huge: true } },
+    { language: 'pl', message: 'm', blocks: [], warnings: [], actions: [], shownIds: ['a'], preferences: {}, summary: ['s'] },
+    200, 12,
+  );
+  assert.equal(row.sessionId, sessionId);
+  assert.equal(row.userText.length, 1000);
+  assert.ok(!row.request.includes('secret') && !row.request.includes('huge'));
+  assert.deepEqual(JSON.parse(row.reply).shownIds, ['a']);
+  assert.ok(!('summary' in JSON.parse(row.reply)));
+
+  const bad = interactionRow({ type: 'operations', sessionId: "x'; DROP", operations: ['y'.repeat(30000)] }, null, 502, 1);
+  assert.equal(bad.sessionId, null);
+  assert.equal(bad.request, null);
+  assert.equal(bad.reply, null);
+  assert.equal(bad.status, 502);
+});
+
+test('saving never throws, with no database or an unreachable one', async () => {
+  await saveInteraction({}, '');
+  await saveInteraction({}, 'not-a-connection-string');
+});
 
 const dictionary = [
   { id: 'vanilla', pl: 'wanilia', family: 'gourmand', aliases: [] },
@@ -26,6 +52,7 @@ const catalog = [
   perfume('c', ['bergamot'], rating(4, 2, 3)),
   perfume('d', ['cedar'], rating(3, 3, 3)),
 ];
+catalog[1].community = { season: { winter: 10, spring: 100, summer: 60, fall: 59, mostVoted: 'spring' }, timeOfDay: { day: 100, night: 20, mostVoted: 'day' } };
 const references = catalog.map(e => ({ id: e.id, name: e.name, brand: e.brand, ratingCount: 1000, status: 'selected', catalogId: e.id, accords: [], noteIds: e.noteIds }));
 const engine = createEngine({ catalog, references, dictionary });
 
@@ -34,6 +61,17 @@ function assistant({ interpret = async () => ({ language: 'pl', intent: 'recomme
 }
 const send = (a, text, preferences = emptyPreferences()) => a.handle({ type: 'message', text, preferences, language: 'pl', history: [] });
 const cardsOf = reply => reply.blocks.find(b => b.type === 'recommendations')?.cards ?? [];
+
+test('a card lists its note tiers, and when to wear it from votes of at least 60', async () => {
+  const select = async () => ({ picks: [{ id: 'b', why: 'x', tradeoff: '' }, { id: 'c', why: 'x', tradeoff: '' }] });
+  const [voted, unvoted] = cardsOf(await assistant({ select }).handle({ type: 'similar', perfumeId: 'a', language: 'pl' }));
+  assert.deepEqual(voted.facts, [
+    { label: 'Nuty głowy', value: 'bergamot, cedar' },
+    { label: 'Pora roku', value: 'na wiosnę, na lato' },
+    { label: 'Pora dnia', value: 'na dzień' },
+  ]);
+  assert.deepEqual(unvoted.facts.slice(1).map(f => f.value), ['Brak danych', 'Brak danych']);
+});
 
 test('a message becomes operations and validated cards from the catalog', async () => {
   const a = assistant({
@@ -44,6 +82,7 @@ test('a message becomes operations and validated cards from the catalog', async 
   assert.deepEqual(reply.preferences.excludedNotes, ['vanilla']);
   assert.deepEqual(cardsOf(reply).map(c => [c.id, c.name, c.why]), [['b', 'Name b', 'Bo świeży.']]);
   assert.deepEqual(reply.summary.map(s => s.label), ['Bez: wanilia']);
+  assert.equal('rating' in cardsOf(reply)[0], false);
 });
 
 test('the model cannot show a perfume outside the shortlist or more than three', async () => {
@@ -144,24 +183,32 @@ test('off-topic text gets a fixed reply, not model prose', async () => {
   assert.match(reply.message, /Pomagam w doborze perfum/);
 });
 
-test('details hide reviews and images stay off by default', async () => {
-  const reply = await assistant().handle({ type: 'details', perfumeId: 'b', language: 'pl' });
-  const block = reply.blocks[0];
-  assert.equal(block.imageUrl, null);
-  assert.equal(block.profile, 'Profil zapachu.');
-  assert.equal(JSON.stringify(block).includes('review'), false);
-  assert.equal(block.textLanguage, 'en');
+test('details answer as a chat comment built from the catalog, with no model call', async () => {
+  let calls = 0;
+  const count = async () => { calls++; return {}; };
+  const reply = await assistant({ interpret: count, select: count }).handle({ type: 'details', perfumeId: 'b', language: 'pl' });
+  const [block] = reply.blocks;
+  assert.equal(calls, 0);
+  assert.equal(reply.message, 'Brand Name b');
+  assert.equal(block.type, 'comment');
+  for (const part of ['Profil zapachu.', 'Nuty głowy: bergamot, cedar', 'Nuty serca: Brak danych', 'Świeżość 5 z 5', 'Trwałość'.toLowerCase(), 'Zalety (tekst źródłowy po angielsku):\n• Lovely']) {
+    assert.ok(block.text.includes(part), part);
+  }
 });
 
-test('images can be enabled explicitly', async () => {
-  const reply = await assistant({ showImages: true }).handle({ type: 'details', perfumeId: 'b' });
-  assert.equal(reply.blocks[0].imageUrl, 'https://example.test/a.jpg');
+test('images stay off by default and can be enabled explicitly', async () => {
+  const body = { type: 'similar', perfumeId: 'b', preferences: {} };
+  assert.equal(cardsOf(await assistant().handle(body))[0].imageUrl, null);
+  assert.equal(cardsOf(await assistant({ showImages: true }).handle(body))[0].imageUrl, 'https://example.test/a.jpg');
 });
 
 test('compare names the widest difference and rejects one perfume', async () => {
   const reply = await assistant().handle({ type: 'compare', perfumeIds: ['a', 'b'], language: 'pl' });
   assert.match(reply.blocks[0].summary, /Największa różnica/);
   assert.deepEqual(reply.blocks[0].sharedNotes, ['cedr']);
+  const [unvoted, voted] = reply.blocks[0].perfumes;
+  assert.deepEqual([voted.topNotes, voted.heartNotes, voted.season, voted.timeOfDay], ['bergamot, cedar', null, 'na wiosnę, na lato', 'na dzień']);
+  assert.deepEqual([unvoted.season, unvoted.timeOfDay], ['Brak danych', 'Brak danych']);
   assert.deepEqual((await assistant().handle({ type: 'compare', perfumeIds: ['a'] })).blocks, []);
 });
 

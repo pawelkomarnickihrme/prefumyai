@@ -186,7 +186,7 @@ export function createAssistant({ engine, dictionary, interpret, select, showIma
     if (answer?.intent === 'details') {
       const [id] = resolvePerfumes(answer.perfumes);
       if (!id) return envelope(next, replyLanguage, { message: t(replyLanguage, 'notFound'), warnings });
-      return envelope(next, replyLanguage, { warnings, blocks: [presentation.details(engine.getPerfume(id), replyLanguage)] });
+      return envelope(next, replyLanguage, { warnings, ...presentation.details(engine.getPerfume(id), replyLanguage) });
     }
     if (answer?.intent === 'other' && !operations.length) {
       return envelope(next, replyLanguage, { message: t(replyLanguage, 'offTopic'), warnings });
@@ -222,7 +222,7 @@ export function createAssistant({ engine, dictionary, interpret, select, showIma
       case 'details': {
         const entry = engine.getPerfume(body.perfumeId);
         if (!entry) return envelope(preferences, language, { message: t(language, 'notFound') });
-        return envelope(preferences, language, { blocks: [presentation.details(entry, language)] });
+        return envelope(preferences, language, presentation.details(entry, language));
       }
       case 'compare': {
         const ids = (Array.isArray(body.perfumeIds) ? body.perfumeIds : []).filter(id => engine.getPerfume(id)).slice(0, 3);

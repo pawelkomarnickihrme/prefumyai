@@ -37,6 +37,8 @@ const CHOICE_WORDS = {
   season: { winter: ['Na zimę', 'For winter'], spring: ['Na wiosnę', 'For spring'], summer: ['Na lato', 'For summer'], fall: ['Na jesień', 'For autumn'] },
   timeOfDay: { day: ['Na dzień', 'For daytime'], night: ['Na wieczór', 'For the evening'] },
 };
+// Votes are scaled so the top choice is 100; the engine treats 60 as a real fit too.
+const WEAR_SHARE = 60;
 const COMMUNITY_WORDS = {
   veryWeak: ['bardzo słaba', 'very weak'], weak: ['słaba', 'weak'], moderate: ['umiarkowana', 'moderate'], longLasting: ['wysoka', 'long-lasting'], eternal: ['bardzo wysoka', 'very long-lasting'],
   intimate: ['blisko skóry', 'intimate'], strong: ['silna', 'strong'], enormous: ['bardzo silna', 'very strong'],
@@ -112,11 +114,22 @@ export function createPresentation({ engine, dictionary, showImages = false }) {
     return pick(language, 'Część społeczności uważa, że jest za drogi.', 'Part of the community finds it overpriced.');
   }
 
+  const noteList = (list, language) => list.map(n => (n.pl && language !== 'en' ? n.pl : n.en)).join(', ');
+
+  const wear = (entry, field, language) => Object.keys(CHOICE_WORDS[field])
+    .filter(option => entry.community?.[field]?.[option] >= WEAR_SHARE)
+    .map(option => word(language, CHOICE_WORDS[field][option]).toLowerCase())
+    .join(', ') || t(language, 'noData');
+
   function card(entry, language, why, tradeoff) {
+    const notes = [['topNotes', entry.notes.top], ['heartNotes', entry.notes.heart], ['baseNotes', entry.notes.base]]
+      .filter(([, list]) => list.length)
+      .map(([label, list]) => ({ label: t(language, label), value: noteList(list, language) }));
+    const facts = [...notes, { label: t(language, 'wearSeason'), value: wear(entry, 'season', language) }, { label: t(language, 'wearTime'), value: wear(entry, 'timeOfDay', language) }];
     return {
       id: entry.id, name: entry.name, brand: entry.brand,
       imageUrl: showImages ? entry.imageUrl : null,
-      rating: entry.rating, ratingCount: entry.ratingCount, why, tradeoff,
+      facts, why, tradeoff,
     };
   }
 
@@ -125,21 +138,28 @@ export function createPresentation({ engine, dictionary, showImages = false }) {
     return voted ? word(language, COMMUNITY_WORDS[voted]) || voted : null;
   }
 
+  // A chat comment built only from catalog data, so the model cannot invent a detail.
   function details(entry, language) {
-    const list = notes => notes.map(n => (n.pl && language !== 'en' ? n.pl : n.en));
+    const noData = t(language, 'noData');
+    const notes = (label, list) => `${t(language, label)}: ${noteList(list, language) || noData}`;
     const profile = language === 'en' ? entry.enrichment?.profileEn : entry.enrichment?.profilePl;
-    return {
-      type: 'details', id: entry.id, name: entry.name, brand: entry.brand,
-      imageUrl: showImages ? entry.imageUrl : null,
-      rating: entry.rating, ratingCount: entry.ratingCount,
-      profile: profile ?? null,
-      notes: { top: list(entry.notes.top), heart: list(entry.notes.heart), base: list(entry.notes.base) },
-      // Pros and cons have no Polish translation yet, so they are labeled as source text.
-      pros: entry.pros.slice(0, 5), cons: entry.cons.slice(0, 5), textLanguage: 'en',
-      scales: Object.keys(SCALE_WORDS).map(scale => ({ label: scaleName(scale, language), value: entry.enrichment?.[scale] ?? null })),
-      priceSegment: entry.enrichment ? word(language, SEGMENTS[entry.enrichment.priceSegment]) : null,
-      community: { longevity: communityValue(entry.community?.longevity, language), sillage: communityValue(entry.community?.sillage, language) },
-    };
+    const scales = Object.keys(SCALE_WORDS)
+      .filter(scale => entry.enrichment?.[scale] != null)
+      .map(scale => `${scaleName(scale, language)} ${entry.enrichment[scale]} ${t(language, 'outOf')}`);
+    const segment = entry.enrichment ? word(language, SEGMENTS[entry.enrichment.priceSegment]) : '';
+    if (segment) scales.push(`${t(language, 'priceSegment')}: ${segment}`);
+    // Pros and cons have no Polish translation yet, so they are labeled as source text.
+    const source = language === 'en' ? '' : ` (${t(language, 'sourceLanguage').toLowerCase()})`;
+    const bullets = (label, list) => `${t(language, label)}${list.length ? `${source}:\n${list.slice(0, 5).map(item => `• ${item}`).join('\n')}` : `: ${noData}`}`;
+    const text = [
+      profile ?? noData,
+      [notes('topNotes', entry.notes.top), notes('heartNotes', entry.notes.heart), notes('baseNotes', entry.notes.base)].join('\n'),
+      scales.length ? `${t(language, 'estimated')}: ${scales.join(', ')}` : null,
+      `${t(language, 'community')}: ${t(language, 'longevity').toLowerCase()} – ${communityValue(entry.community?.longevity, language) ?? noData.toLowerCase()}, ${t(language, 'sillage').toLowerCase()} – ${communityValue(entry.community?.sillage, language) ?? noData.toLowerCase()}`,
+      bullets('pros', entry.pros),
+      bullets('cons', entry.cons),
+    ].filter(Boolean).join('\n\n');
+    return { message: `${entry.brand} ${entry.name}`, blocks: [{ type: 'comment', text }] };
   }
 
   function comparison(ids, language) {
@@ -149,10 +169,15 @@ export function createPresentation({ engine, dictionary, showImages = false }) {
       return {
         id: item.id, name: entry.name, brand: entry.brand,
         profile: (language === 'en' ? entry.enrichment?.profileEn : entry.enrichment?.profilePl) ?? null,
+        topNotes: noteList(entry.notes.top, language) || null,
+        heartNotes: noteList(entry.notes.heart, language) || null,
+        baseNotes: noteList(entry.notes.base, language) || null,
         uniqueNotes: item.uniqueNotes.map(n => noteName(n, language)),
         scales: Object.keys(SCALE_WORDS).map(scale => ({ label: scaleName(scale, language), value: item.scales[scale] })),
         longevity: communityValue(entry.community?.longevity, language),
         sillage: communityValue(entry.community?.sillage, language),
+        season: wear(entry, 'season', language),
+        timeOfDay: wear(entry, 'timeOfDay', language),
       };
     });
     let summary = t(language, 'noBigDifference');

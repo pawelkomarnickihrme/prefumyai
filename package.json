@@ -17,6 +17,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@neondatabase/serverless": "1.2.0",
     "ai": "7.0.162",
     "next": "16.4.5",
     "react": "19.3.1",

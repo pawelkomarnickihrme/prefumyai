@@ -69,6 +69,8 @@ Przykładowe akcje pod wynikami:
 
 Kliknięcia i wiadomości zmieniają ten sam profil preferencji. Przyciski wysyłają gotowe operacje, bez wywołania modelu do samej zmiany stanu.
 
+Każdą kartę można dodać do ulubionych lub posiadanych. To dwie niezależne listy: nie zmieniają profilu preferencji i na razie nie wpływają na dobór.
+
 ### Język
 
 Asystent odpowiada w języku ostatniej wiadomości użytkownika. Interfejs przełącza się razem z nim lub ręcznie.
@@ -82,11 +84,12 @@ Asystent pyta o budżet, gdy ma to znaczenie, i zamienia go na orientacyjny segm
 | Komponent | Zawartość |
 |---|---|
 | `PreferenceQuestion` | Pytanie z przyciskami, np. „Dyskretny / Wyrazisty / Bez znaczenia” |
-| `PerfumeRecommendations` | Do trzech kart: zdjęcie, nazwa, powód dopasowania, ważny kompromis |
-| `PerfumeDetails` | Nuty, opis, zalety, wady i dostępne dane społeczności, bez surowych recenzji |
+| `PerfumeRecommendations` | Do trzech poziomych kart, bez numeracji: zdjęcie, wyeksponowana marka, nazwa, powód dopasowania, ważny kompromis, „Dodaj do ulubionych” i „Dodaj do posiadanych” |
+| `PerfumeDetails` | Komentarz czatu po kliknięciu „Szczegóły”, a nie osobny panel: nuty, opis, zalety, wady i dostępne dane społeczności, bez surowych recenzji. Tekst powstaje kodem z danych katalogu, bez wywołania modelu |
 | `PerfumeComparison` | Porównanie 2–3 zapachów według tych samych kryteriów, ze wspólnymi i różniącymi się nutami oraz różnicami cech |
 | `PreferenceSummary` | Podsumowanie, np. „Szukamy: do biura, świeże, bez wanilii”, z możliwością usunięcia kryterium |
 | `NoMatch` | Informacja o braku wyników i propozycja poluzowania konkretnego warunku |
+| Ulubione i posiadane | Dwie listy obok „Twojego kierunku” z możliwością usunięcia pozycji, widoczne także przed rozpoczęciem nowej rozmowy |
 
 Nie pokazywać pozornie precyzyjnych wskaźników typu „97% dopasowania”. Zamiast tego używać komunikatów takich jak „Najlepiej pasuje do podanych preferencji” z konkretnymi powodami.
 
@@ -103,6 +106,7 @@ Przepływ:
 - Next.js, AI SDK i Vercel AI Gateway.
 - Katalog jako plik JSON w pamięci serwera, bez surowych recenzji i bez bazy danych.
 - Stan rozmowy w sesji przeglądarki, dostęp dla testerów chroniony wspólnym hasłem.
+- Ulubione i posiadane w `localStorage`: przetrwają nową rozmowę, ale tylko w tej przeglądarce, bo nie ma kont.
 - Repozytorium git inicjowane przed Etapem 1, surowe `wyniki/` poza nim.
 
 Bazę danych dodajemy dopiero wtedy, gdy pojawią się konta albo trzeba będzie zapisywać dane między sesjami.
@@ -195,7 +199,7 @@ Przykładowy kontrakt odpowiedzi — identyfikatory poniżej są ilustracyjne:
 }
 ```
 
-Serwer sprawdza, czy identyfikatory są na liście kandydatów, i pobiera dane kart z katalogu w języku rozmowy. Dzięki temu model nie podmienia zdjęcia, oceny, nazwy ani tłumaczenia.
+Serwer sprawdza, czy identyfikatory są na liście kandydatów, i pobiera dane kart z katalogu w języku rozmowy. Dzięki temu model nie podmienia zdjęcia, nazwy ani tłumaczenia.
 
 ### Modele
 
@@ -244,7 +248,7 @@ Do zrobienia (płatne wywołania):
 
 Interfejs według `deignaing.md`, uruchamiany przez `pnpm run dev`, wymaga `APP_PASSWORD`.
 
-- `app/`: ekran dostępu, rozmowa, „Twój kierunek”, karty, szczegóły, porównanie, brak wyników, błędy i ponowienie, PL/EN.
+- `app/`: ekran dostępu, rozmowa, „Twój kierunek”, ulubione i posiadane, poziome karty, szczegóły jako komentarz czatu, porównanie, brak wyników, błędy i ponowienie, PL/EN.
 - `src/assistant.mjs`: interpretacja, operacje, wybór spośród kandydatów i walidacja odpowiedzi modelu.
 - Model rozmowy: domyślnie `deepseek/deepseek-v4-flash`, zmiana przez `CHAT_MODEL`. Ostateczny wybór w Etapie 4.
 - Sprawdzone w przeglądarce na 1440, 375 i 320 px.
@@ -252,7 +256,8 @@ Interfejs według `deignaing.md`, uruchamiany przez `pnpm run dev`, wymaga `APP_
 Świadome uproszczenia:
 
 - Odpowiedzi nie są strumieniowane, status jest jeden i prawdziwy.
-- Zdjęcia są wyłączone (`SHOW_PRODUCT_IMAGES=0`), dopóki nie ustalimy, czy można ich użyć.
+- Zdjęcia są włączane flagą `SHOW_PRODUCT_IMAGES=1` i ładowane bezpośrednio z `fimgs.net`. Prawa do nich trzeba rozstrzygnąć przed startem publicznym.
+- Karty nie pokazują oceny społeczności: po zaokrągleniu do 1–5 aż 96% zapachów do polecania miało 4, więc nie pomagała w wyborze. Ocena i liczba ocen nadal rozstrzygają remisy.
 - Brak limitu prób logowania i limitu zapytań, do dodania przed startem publicznym.
 - Katalog jest czytany z ignorowanego `wyniki/`, więc wdrożenie wymaga osobnej decyzji, skąd serwer ma go brać.
 
@@ -274,6 +279,6 @@ Zamknięty test, nie publiczne uruchomienie. Bez kont użytkowników, integracji
 
 Przed każdym startem publicznym trzeba rozstrzygnąć prawa do zdjęć, opisów i recenzji oraz ochronę przed nadużyciami i kosztami modelu.
 
-Na później: wyciąganie z recenzji zdań porównawczych typu „słabsza wersja Coco Mademoiselle”, po sprawdzeniu ich jakości.
+Na później: wyciąganie z recenzji zdań porównawczych typu „słabsza wersja Coco Mademoiselle”, po sprawdzeniu ich jakości. Do decyzji po teście: czy posiadane mają znikać z propozycji, a ulubione służyć jako sygnał preferencji.
 
 Ten dokument jest planem, nie opisem wdrożonych funkcji.

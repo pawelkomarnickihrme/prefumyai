@@ -2,12 +2,28 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { t } from '../src/i18n.mjs';
-import { Block, DetailsContent } from './blocks.jsx';
+import { Block } from './blocks.jsx';
 
 const STORAGE_KEY = 'doradca-rozmowa';
+const SAVED_KEY = 'doradca-kolekcja';
 const NEAR_BOTTOM = 160;
-const MAX_COMPARE = 3;
 const emptyPreferences = {};
+
+// ponytail: favorites live in this browser only; move them to the server when accounts exist.
+function readSaved() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVED_KEY));
+    return { favorites: saved?.favorites ?? [], owned: saved?.owned ?? [] };
+  } catch {
+    return { favorites: [], owned: [] };
+  }
+}
+
+function writeSaved(value) {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(value));
+  } catch { /* Blocked storage only means the lists last until this page closes. */ }
+}
 
 function readSession() {
   try {
@@ -29,23 +45,23 @@ export default function Chat() {
   const [preferences, setPreferences] = useState(emptyPreferences);
   const [summary, setSummary] = useState([]);
   const [shownIds, setShownIds] = useState([]);
-  const [compare, setCompare] = useState([]);
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState('idle');
   const [failed, setFailed] = useState(null);
-  const [drawer, setDrawer] = useState(null);
+  const [saved, setSaved] = useState({ favorites: [], owned: [] });
   const [hasNewReply, setHasNewReply] = useState(false);
   const [restored, setRestored] = useState(false);
 
   const abortRef = useRef(null);
   const inputRef = useRef(null);
-  const drawerRef = useRef(null);
   const confirmRef = useRef(null);
   const followRef = useRef(true);
+  const sessionRef = useRef(null);
   const busy = status === 'busy';
 
   useEffect(() => {
     const saved = readSession();
+    sessionRef.current = saved?.sessionId ?? crypto.randomUUID();
     if (saved) {
       setLanguage(saved.language ?? 'pl');
       setTurns(saved.turns ?? []);
@@ -53,12 +69,17 @@ export default function Chat() {
       setSummary(saved.summary ?? []);
       setShownIds(saved.shownIds ?? []);
     }
+    setSaved(readSaved());
     setRestored(true);
   }, []);
 
   useEffect(() => {
-    if (restored) writeSession({ language, turns, preferences, summary, shownIds });
+    if (restored) writeSession({ sessionId: sessionRef.current, language, turns, preferences, summary, shownIds });
   }, [restored, language, turns, preferences, summary, shownIds]);
+
+  useEffect(() => {
+    if (restored) writeSaved(saved);
+  }, [restored, saved]);
 
   useEffect(() => { document.documentElement.lang = language; }, [language]);
 
@@ -78,10 +99,6 @@ export default function Chat() {
     else setHasNewReply(true);
   }, [turns]);
 
-  useEffect(() => {
-    if (drawer && !drawerRef.current?.open) drawerRef.current?.showModal();
-  }, [drawer]);
-
   // A long reply must be read from its start, or the first proposals go unseen.
   function scrollToLatest() {
     const turns = document.querySelectorAll('.turn');
@@ -92,7 +109,7 @@ export default function Chat() {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, sessionId: sessionRef.current }),
       signal,
     });
     if (response.status === 401) {
@@ -123,7 +140,6 @@ export default function Chat() {
       setLanguage(reply.language);
       if (reply.shownIds.length) setShownIds(reply.shownIds);
       if (payload.type === 'message') setDraft('');
-      if (payload.type === 'compare') setCompare([]);
       setStatus('idle');
     } catch (error) {
       if (error.message === 'unauthorized') return;
@@ -156,26 +172,27 @@ export default function Chat() {
 
   const api = {
     send,
-    async openDetails(perfumeId) {
-      const reply = await request({ type: 'details', perfumeId, preferences, language }).catch(() => null);
-      const block = reply?.blocks[0];
-      if (block) setDrawer(block);
-      else setFailed({ payload: { type: 'details', perfumeId }, aborted: false });
+    // The comment answers this click, so show it even when the card sits above the end of the chat.
+    openDetails({ id, brand, name }) {
+      followRef.current = true;
+      send({ type: 'details', perfumeId: id }, `${t(language, 'details')}: ${brand} ${name}`);
     },
-    toggleCompare(id, name) {
-      setCompare(current => {
-        if (current.some(item => item.id === id)) return current.filter(item => item.id !== id);
-        return current.length >= MAX_COMPARE ? current : [...current, { id, name }];
-      });
+    toggleSaved(list, { id, brand, name }) {
+      setSaved(current => ({
+        ...current,
+        [list]: current[list].some(item => item.id === id)
+          ? current[list].filter(item => item.id !== id)
+          : [...current[list], { id, brand, name }],
+      }));
     },
   };
 
   function startOver() {
+    sessionRef.current = crypto.randomUUID();
     setTurns([]);
     setPreferences(emptyPreferences);
     setSummary([]);
     setShownIds([]);
-    setCompare([]);
     setDraft('');
     setFailed(null);
     confirmRef.current?.close();
@@ -183,7 +200,6 @@ export default function Chat() {
   }
 
   const started = turns.length > 0 || busy || failed;
-  const compareIds = compare.map(item => item.id);
 
   const direction = summary.length ? (
     <ul className="chips">
@@ -201,6 +217,26 @@ export default function Chat() {
       ))}
     </ul>
   ) : <p className="meta">{t(language, 'directionEmpty')}</p>;
+
+  const savedCount = saved.favorites.length + saved.owned.length;
+  const collection = ['favorites', 'owned'].filter(list => saved[list].length).map(list => (
+    <section className="collection" key={list}>
+      <h2 className="eyebrow">{t(language, list)} ({saved[list].length})</h2>
+      <ul className="chips">
+        {saved[list].map(item => (
+          <li className="chip" key={item.id}>
+            <span lang="en"><strong>{item.brand}</strong> {item.name}</span>
+            <button
+              type="button"
+              className="chip-remove"
+              aria-label={`${t(language, list === 'favorites' ? 'removeFavorite' : 'removeOwned')}: ${item.brand} ${item.name}`}
+              onClick={() => api.toggleSaved(list, item)}
+            >×</button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ));
 
   return (
     <div className="shell">
@@ -220,12 +256,20 @@ export default function Chat() {
             {direction}
           </details>
         )}
+        {started && savedCount > 0 && (
+          <details className="direction-mobile">
+            <summary>{t(language, 'collection')} ({savedCount})</summary>
+            {collection}
+          </details>
+        )}
 
         <main className="conversation">
           {!started && (
             <section className="hero">
               <h1 className="display">{t(language, 'heroTitle')}</h1>
               <p className="lead">{t(language, 'heroLead')}</p>
+              <p className="meta">{t(language, 'recordingNotice')}</p>
+              {collection}
             </section>
           )}
 
@@ -236,7 +280,7 @@ export default function Chat() {
                 {turn.reply.message && <p className="reply-text">{turn.reply.message}</p>}
                 {turn.reply.warnings.map(warning => <p className="warning" key={warning}>{warning}</p>)}
                 {turn.reply.blocks.map((block, index) => (
-                  <Block key={index} block={block} language={turn.reply.language} api={api} compareIds={compareIds} />
+                  <Block key={index} block={block} language={turn.reply.language} api={api} saved={saved} />
                 ))}
                 {turn.reply.actions.length > 0 && (
                   <div className="option-row">
@@ -268,6 +312,7 @@ export default function Chat() {
           <aside className="direction" aria-label={t(language, 'direction')}>
             <h2 className="eyebrow">{t(language, 'direction')}</h2>
             {direction}
+            {collection}
             <button type="button" className="link" onClick={() => (turns.length ? confirmRef.current?.showModal() : startOver())}>{t(language, 'newChat')}</button>
           </aside>
         )}
@@ -276,22 +321,6 @@ export default function Chat() {
       <div className="dock">
         {hasNewReply && (
           <button type="button" className="new-reply" onClick={() => { scrollToLatest(); setHasNewReply(false); }}>{t(language, 'newReply')}</button>
-        )}
-        {compare.length > 0 && (
-          <div className="compare-tray">
-            <ul>
-              {compare.map(item => (
-                <li className="chip" key={item.id}>
-                  <span lang="en">{item.name}</span>
-                  <button type="button" className="chip-remove" aria-label={`${t(language, 'removeCompare')}: ${item.name}`} onClick={() => api.toggleCompare(item.id)}>×</button>
-                </li>
-              ))}
-            </ul>
-            {compare.length < 2
-              ? <p className="meta">{t(language, 'pickOneMore')}</p>
-              : <button type="button" className="button button-primary" disabled={busy} onClick={() => send({ type: 'compare', perfumeIds: compareIds }, `${t(language, 'compare')}: ${compare.map(i => i.name).join(', ')}`)}>{t(language, 'compare')}</button>}
-            {compare.length >= MAX_COMPARE && <p className="meta">{t(language, 'compareLimit')}</p>}
-          </div>
         )}
         {!started && (
           <div className="examples" role="group" aria-label={t(language, 'examplesLabel')}>
@@ -319,15 +348,6 @@ export default function Chat() {
           </div>
         </form>
       </div>
-
-      <dialog className="drawer" ref={drawerRef} onClose={() => setDrawer(null)} aria-label={drawer ? `${drawer.brand} ${drawer.name}` : undefined}>
-        {drawer && (
-          <>
-            <button type="button" className="button drawer-close" onClick={() => drawerRef.current?.close()}>{t(language, 'close')}</button>
-            <DetailsContent block={drawer} language={language} />
-          </>
-        )}
-      </dialog>
 
       <dialog className="confirm" ref={confirmRef}>
         <p>{t(language, 'newChatConfirm')}</p>
