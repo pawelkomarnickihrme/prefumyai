@@ -80,7 +80,6 @@ const describe = condition => condition.key;
 export function createEngine({ catalog, references, dictionary }) {
   const byId = new Map(catalog.map(e => [e.id, e]));
   const referenceById = new Map(references.map(r => [r.id, r]));
-  const recommendable = catalog.filter(e => e.recommendable);
 
   const documentFrequency = new Map();
   for (const entry of catalog) for (const t of new Set(tokensOf(entry))) documentFrequency.set(t, (documentFrequency.get(t) ?? 0) + 1);
@@ -259,14 +258,22 @@ export function createEngine({ catalog, references, dictionary }) {
   const byRank = (a, b) => b.score - a.score || b.entry.rating - a.entry.rating ||
     b.entry.ratingCount - a.entry.ratingCount || (a.entry.id < b.entry.id ? -1 : 1);
 
-  function recommend(preferences, { limit = SHORTLIST } = {}) {
+  // Ownership is request scope, never a saved preference or a relaxable exclusion.
+  function ownedPool(ownedIds, collectionOnly) {
+    const owned = new Set((Array.isArray(ownedIds) ? ownedIds : [])
+      .filter(id => typeof id === 'string' && byId.has(id)));
+    return catalog.filter(e => collectionOnly === true ? owned.has(e.id) : !owned.has(e.id));
+  }
+
+  function recommend(preferences, { limit = SHORTLIST, ownedIds = [], collectionOnly = false } = {}) {
     const constraints = resolveConstraints(preferences);
     const { conditions, warnings } = constraints;
-    const passing = catalog.filter(e => conditions.every(c => c.test(e)));
+    const pool = ownedPool(ownedIds, collectionOnly);
+    const passing = pool.filter(e => conditions.every(c => c.test(e)));
     if (!passing.length) {
       const relaxations = conditions.filter(c => !c.fixed).map(condition => ({
         condition: describe(condition),
-        matches: catalog.filter(e => conditions.every(c => c === condition || c.test(e))).length,
+        matches: pool.filter(e => conditions.every(c => c === condition || c.test(e))).length,
       })).filter(r => r.matches > 0).sort((a, b) => b.matches - a.matches);
       return { status: 'noMatch', candidates: [], relaxations, warnings };
     }
@@ -276,12 +283,12 @@ export function createEngine({ catalog, references, dictionary }) {
   }
 
   // Works for any reference, including perfumes that are not in the catalog.
-  function similar(id, { limit = SHORTLIST } = {}) {
+  function similar(id, { limit = SHORTLIST, ownedIds = [], collectionOnly = false } = {}) {
     const source = referenceById.get(id) ?? byId.get(id);
     if (!source) throw new Error(`Nieznany zapach: ${id}`);
     if (!tokensOf(source).length || !source.noteIds.length) return { status: 'noNotes', candidates: [] };
     const self = byId.get(source.catalogId ?? id);
-    const ranked = recommendable.filter(e => e.id !== id && e.id !== self?.id).map(entry => ({
+    const ranked = ownedPool(ownedIds, collectionOnly).filter(e => e.recommendable && e.id !== id && e.id !== self?.id).map(entry => ({
       entry, score: Math.round(cosine(vectorOf(source), vectorOf(entry)) * 1000) / 1000,
     })).filter(r => r.score > 0).sort(byRank);
     return {

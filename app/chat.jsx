@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { t } from '../src/i18n.mjs';
 import { Block } from './blocks.jsx';
+import { BotanicalArt, Icon } from './visuals.jsx';
 
 const STORAGE_KEY = 'doradca-rozmowa';
 const SAVED_KEY = 'doradca-kolekcja';
@@ -51,7 +52,6 @@ export default function Chat() {
   const [saved, setSaved] = useState({ favorites: [], owned: [] });
   const [hasNewReply, setHasNewReply] = useState(false);
   const [restored, setRestored] = useState(false);
-
   const abortRef = useRef(null);
   const inputRef = useRef(null);
   const confirmRef = useRef(null);
@@ -131,7 +131,8 @@ export default function Chat() {
       ...(turn.user ? [{ role: 'user', text: turn.user }] : []),
       ...(turn.reply?.message ? [{ role: 'assistant', text: turn.reply.message }] : []),
     ]);
-    const body = { ...payload, preferences, language, shownIds, history };
+    const previousScope = turns.findLast(turn => turn.reply.blocks.some(block => ['recommendations', 'question', 'noMatch'].includes(block.type)))?.reply.collectionOnly === true;
+    const body = { preferences, language, shownIds, history, collectionOnly: payload.type === 'message' ? false : previousScope, ...payload, ownedIds: saved.owned.map(item => item.id) };
     try {
       const reply = await request(body, controller.signal);
       setTurns(current => [...current, { id: crypto.randomUUID(), user: visibleText, reply }]);
@@ -149,7 +150,7 @@ export default function Chat() {
     } finally {
       abortRef.current = null;
     }
-  }, [language, preferences, request, shownIds, turns]);
+  }, [language, preferences, request, shownIds, turns, saved.owned]);
 
   function submit(event) {
     event?.preventDefault();
@@ -172,7 +173,6 @@ export default function Chat() {
 
   const api = {
     send,
-    // The comment answers this click, so show it even when the card sits above the end of the chat.
     openDetails({ id, brand, name }) {
       followRef.current = true;
       send({ type: 'details', perfumeId: id }, `${t(language, 'details')}: ${brand} ${name}`);
@@ -186,6 +186,8 @@ export default function Chat() {
       }));
     },
   };
+
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   function startOver() {
     sessionRef.current = crypto.randomUUID();
@@ -222,6 +224,7 @@ export default function Chat() {
   const collection = ['favorites', 'owned'].filter(list => saved[list].length).map(list => (
     <section className="collection" key={list}>
       <h2 className="eyebrow">{t(language, list)} ({saved[list].length})</h2>
+      {list === 'owned' && <p className="meta">{t(language, 'ownedHint')}</p>}
       <ul className="chips">
         {saved[list].map(item => (
           <li className="chip" key={item.id}>
@@ -230,6 +233,7 @@ export default function Chat() {
               type="button"
               className="chip-remove"
               aria-label={`${t(language, list === 'favorites' ? 'removeFavorite' : 'removeOwned')}: ${item.brand} ${item.name}`}
+              disabled={busy && list === 'owned'}
               onClick={() => api.toggleSaved(list, item)}
             >×</button>
           </li>
@@ -241,10 +245,10 @@ export default function Chat() {
   return (
     <div className="shell">
       <header className="topbar">
-        <span className="wordmark">Doradca perfumowy</span>
+        <span className="wordmark"><span className="brand-symbol"><Icon name="leaf" size={22} /></span>{t(language, 'productName')}</span>
         <div className="language" role="group" aria-label={t(language, 'language')}>
           {['pl', 'en'].map(option => (
-            <button key={option} type="button" aria-pressed={language === option} onClick={() => changeLanguage(option)}>{option.toUpperCase()}</button>
+            <button key={option} type="button" disabled={busy} aria-pressed={language === option} onClick={() => changeLanguage(option)}>{option.toUpperCase()}</button>
           ))}
         </div>
       </header>
@@ -263,12 +267,12 @@ export default function Chat() {
           </details>
         )}
 
-        <main className="conversation">
+        <main className="conversation" id="conversation">
           {!started && (
             <section className="hero">
-              <h1 className="display">{t(language, 'heroTitle')}</h1>
-              <p className="lead">{t(language, 'heroLead')}</p>
-              <p className="meta">{t(language, 'recordingNotice')}</p>
+              <div className="hero-copy"><p className="eyebrow hero-eyebrow"><span className="eyebrow-line" />{t(language, 'atelier')}</p><h1 className="display">{t(language, 'heroTitle')}</h1><p className="lead">{t(language, 'heroLead')}</p><p className="hero-footnote">{t(language, 'heroFootnote')}</p></div>
+              <figure className="hero-art"><BotanicalArt /><figcaption><span>{t(language, 'illustrationCaption')}</span><span className="meta">{t(language, 'illustrationLabel')}</span></figcaption></figure>
+              <p className="meta recording-notice">{t(language, 'recordingNotice')}</p>
               {collection}
             </section>
           )}
@@ -279,13 +283,13 @@ export default function Chat() {
               <div className="reply" lang={turn.reply.language}>
                 {turn.reply.message && <p className="reply-text">{turn.reply.message}</p>}
                 {turn.reply.warnings.map(warning => <p className="warning" key={warning}>{warning}</p>)}
-                {turn.reply.blocks.map((block, index) => (
-                  <Block key={index} block={block} language={turn.reply.language} api={api} saved={saved} />
+                {turn.reply.blocks.filter(block => block.type !== 'comment' || !turn.reply.blocks.some(item => item.type === 'details')).map((block, index) => (
+                  <Block key={index} block={block} language={turn.reply.language} api={{ ...api, send: (payload, text) => send({ ...payload, collectionOnly: turn.reply.collectionOnly === true }, text) }} saved={saved} busy={busy} />
                 ))}
                 {turn.reply.actions.length > 0 && (
                   <div className="option-row">
                     {turn.reply.actions.map(item => (
-                      <button type="button" className="button" key={item.action} disabled={busy} onClick={() => send({ type: 'action', action: item.action, shownIds: turn.reply.shownIds }, item.label)}>
+                      <button type="button" className="button" key={item.action} disabled={busy} onClick={() => send({ type: 'action', action: item.action, shownIds: turn.reply.shownIds, collectionOnly: turn.reply.collectionOnly === true }, item.label)}>
                         {item.label}
                       </button>
                     ))}
@@ -344,7 +348,7 @@ export default function Chat() {
             />
             {busy
               ? <button type="button" className="button" onClick={() => abortRef.current?.abort()}>{t(language, 'stop')}</button>
-              : <button type="submit" className="button button-primary" disabled={!draft.trim()}>{t(language, 'send')}</button>}
+              : <button type="submit" className="button button-primary" disabled={!draft.trim()}>{t(language, 'send')}<Icon name="arrow" size={18} /></button>}
           </div>
         </form>
       </div>

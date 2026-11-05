@@ -1,71 +1,34 @@
 'use client';
 
 import { t } from '../src/i18n.mjs';
+import { Icon, Photo as PerfumePhoto, Scale, ScentProfile } from './visuals.jsx';
+import { PerfumeContent } from './perfume-details.jsx';
 
-function Bottle({ language }) {
-  return (
-    <div className="placeholder">
-      <svg viewBox="0 0 48 72" width="40" height="60" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.25">
-        <rect x="18" y="3" width="12" height="11" rx="1.5" />
-        <path d="M20 14v6M28 14v6" />
-        <rect x="7" y="20" width="34" height="49" rx="4" />
-        <path d="M14 36h20" />
-      </svg>
-      <span>{t(language, 'noImage')}</span>
-    </div>
-  );
-}
-
-function Photo({ item, language }) {
-  return (
-    <div className="photo">
-      {item.imageUrl
-        ? <img src={item.imageUrl} alt={`${item.brand} ${item.name}`} referrerPolicy="no-referrer" loading="lazy" />
-        : <Bottle language={language} />}
-    </div>
-  );
-}
-
-function Recommendations({ block, language, api, saved }) {
+function Recommendations({ block, language, api, saved, busy }) {
   return (
     <>
       <ul className="cards">
-        {block.cards.map(card => {
+        {block.cards.map((card, index) => {
           const favorite = saved.favorites.some(item => item.id === card.id);
           const owned = saved.owned.some(item => item.id === card.id);
           return (
             <li className="card" key={card.id}>
-              <Photo item={card} language={language} />
+              <div className="card-visual"><span className="card-index" aria-hidden="true">0{index + 1}</span><PerfumePhoto item={card} language={language} /></div>
               <div className="card-body">
-                <p className="perfume-brand" lang="en">{card.brand}</p>
-                {/* The button stretches over the whole card in CSS, so the card opens details by mouse and keyboard. */}
-                <h3 className="perfume-name" lang="en">
-                  <button type="button" className="card-open" aria-label={`${t(language, 'details')}: ${card.brand} ${card.name}`} onClick={() => api.openDetails(card)}>{card.name}</button>
-                </h3>
-                {card.facts?.length > 0 && (
-                  <dl className="card-facts">
-                    {card.facts.map(fact => (
-                      <div key={fact.label}><dt>{fact.label}</dt> <dd>{fact.value}</dd></div>
-                    ))}
-                  </dl>
-                )}
-                <h4>{t(language, 'whyFits')}</h4>
-                <p>{card.why}</p>
-                {card.tradeoff && (<><h4>{t(language, 'goodToKnow')}</h4><p>{card.tradeoff}</p></>)}
-              </div>
-              <div className="card-actions">
-                <button type="button" className="button" aria-pressed={favorite} onClick={() => api.toggleSaved('favorites', card)}>
-                  {t(language, favorite ? 'removeFavorite' : 'addFavorite')}
-                </button>
-                <button type="button" className="button" aria-pressed={owned} onClick={() => api.toggleSaved('owned', card)}>
-                  {t(language, owned ? 'removeOwned' : 'addOwned')}
-                </button>
+                <div className="card-heading"><div><p className="perfume-brand" lang="en">{card.brand}</p><h3 className="perfume-name" lang="en"><a className="card-open" href="#conversation" aria-label={`${t(language, 'details')}: ${card.brand} ${card.name}`} aria-disabled={busy} onClick={event => { event.preventDefault(); if (!busy) api.openDetails(card); }}>{card.name}</a></h3></div><Icon name="arrow" size={20} /></div>
+                <ScentProfile perfume={card} language={language} compact />
+                <div className="card-reason"><h4><Icon name="leaf" size={16} />{t(language, 'whyFits')}</h4><p>{card.why}</p></div>
+                {card.tradeoff && <div className="card-tradeoff"><h4>{t(language, 'goodToKnow')}</h4><p>{card.tradeoff}</p></div>}
+                <div className="card-actions">
+                  <button type="button" className="card-action" aria-label={`${t(language, favorite ? 'removeFavorite' : 'addFavorite')}: ${card.brand} ${card.name}`} aria-pressed={favorite} onClick={() => api.toggleSaved('favorites', card)}><Icon name={favorite ? 'check' : 'bookmark'} size={18} />{t(language, favorite ? 'saved' : 'save')}</button>
+                  <button type="button" className="card-action" aria-label={`${t(language, owned ? 'removeOwned' : 'addOwned')}: ${card.brand} ${card.name}`} aria-pressed={owned} disabled={busy} onClick={() => api.toggleSaved('owned', card)}><Icon name={owned ? 'check' : 'bottle'} size={18} />{t(language, owned ? 'alreadyOwned' : 'iOwn')}</button>
+                </div>
               </div>
             </li>
           );
         })}
       </ul>
-      <p className="hint">{t(language, 'sampleHint')}</p>
+      <p className="sample-note"><Icon name="leaf" size={18} />{t(language, 'sampleHint')}</p>
     </>
   );
 }
@@ -108,7 +71,7 @@ function Comparison({ block, language }) {
     ...block.perfumes[0].scales.map((scale, index) => ({
       label: scale.label,
       source: t(language, 'estimated'),
-      value: p => (p.scales[index].value === null ? t(language, 'noData') : `${p.scales[index].value} ${t(language, 'outOf')}`),
+      value: p => <Scale value={p.scales[index]?.value} language={language} />,
     })),
     { label: t(language, 'longevity'), source: t(language, 'community'), value: p => orNoData(p.longevity, language) },
     { label: t(language, 'sillage'), source: t(language, 'community'), value: p => orNoData(p.sillage, language) },
@@ -117,9 +80,9 @@ function Comparison({ block, language }) {
   ];
   return (
     <section className="comparison" style={{ '--columns': block.perfumes.length }}>
-      <h3 className="section-title">{t(language, 'compareTitle')}</h3>
-      <p>{block.summary}</p>
-      <p className="meta">{t(language, 'sharedNotes')}: {listOrNoData(block.sharedNotes, language)}</p>
+      <div className="comparison-intro"><p className="eyebrow"><Icon name="compare" size={16} />{t(language, 'sideBySide')}</p><h3 className="section-title">{t(language, 'compareTitle')}</h3><p>{block.summary}</p></div>
+      <div className="comparison-products">{block.perfumes.map((perfume, index) => <div className="comparison-product" key={perfume.id}><span className="eyebrow">0{index + 1}</span><PerfumePhoto item={perfume} language={language} /><p className="perfume-brand" lang="en">{perfume.brand}</p><h4 className="perfume-name" lang="en">{perfume.name}</h4></div>)}</div>
+      <p className="shared-notes"><Icon name="leaf" size={18} /><span><strong>{t(language, 'sharedNotes')}</strong><br />{listOrNoData(block.sharedNotes, language)}</span></p>
       {rows.map(row => (
         <div className="criterion" key={row.label}>
           <h4>{row.label}{row.source && <span className="meta"> · {row.source}</span>}</h4>
@@ -138,9 +101,10 @@ function Comparison({ block, language }) {
 }
 
 // A closed set of components: anything else from the server renders nothing.
-export function Block({ block, language, api, saved }) {
+export function Block({ block, language, api, saved, busy = false }) {
   switch (block.type) {
-    case 'recommendations': return <Recommendations block={block} language={language} api={api} saved={saved} />;
+    case 'recommendations': return <Recommendations block={block} language={language} api={api} saved={saved} busy={busy} />;
+    case 'details': return <section className="inline-details"><PerfumeContent perfume={block.perfume} language={language} /></section>;
     case 'question': return <Question block={block} api={api} />;
     case 'noMatch': return <NoMatch block={block} language={language} api={api} />;
     case 'comparison': return <Comparison block={block} language={language} />;

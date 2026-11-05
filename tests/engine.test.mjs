@@ -205,3 +205,50 @@ test('recommendation is deterministic', () => {
   const p = run({ op: 'add', field: 'likedNotes', value: 'cedar' });
   assert.deepEqual(engine.recommend(p), engine.recommend(p));
 });
+
+test('ownership filters before the 20-item shortlist in both directions', () => {
+  const many = Array.from({ length: 26 }, (_, i) => perfume(`p${i}`, ['rose'], rating(3, 3, 3), { rating: 5 - i / 100 }));
+  const local = createEngine({ catalog: many, references: [], dictionary });
+  const preferences = emptyPreferences();
+  const before = structuredClone(preferences);
+  const ownedIds = many.slice(0, 23).map(e => e.id);
+  assert.equal(local.recommend(preferences).candidates.length, 20);
+  const discoveries = local.recommend(preferences, { ownedIds });
+  assert.deepEqual(ids(discoveries), ['p23', 'p24', 'p25']);
+  assert.equal(discoveries.total, 3);
+  // An owned item below the default shortlist still makes it into collection search.
+  assert.deepEqual(ids(local.recommend(preferences, { ownedIds: ['p25'], collectionOnly: true })), ['p25']);
+  assert.deepEqual(preferences, before);
+});
+
+test('ownership validates exact catalog IDs only and does not persist or override hard exclusions', () => {
+  const preferences = run({ op: 'add', field: 'excludedNotes', value: 'vanilla' }, { op: 'add', field: 'excludedPerfumes', value: 'floral' });
+  const before = structuredClone(preferences);
+  const ownedIds = ['sweet', 'fresh-quiet', 'floral', 'fresh-quiet', 'sauvage-elixir', ' Fresh-quiet ', null, 42, {}, '__proto__'];
+  assert.deepEqual(ids(engine.recommend(preferences, { ownedIds, collectionOnly: true })), ['fresh-quiet']);
+  assert.ok(ids(engine.recommend(preferences, { ownedIds })).every(id => !ownedIds.includes(id)));
+  assert.deepEqual(preferences, before);
+  assert.ok(ids(engine.recommend(preferences)).includes('fresh-quiet'));
+  for (const malformed of [null, 'sweet', {}, [false, null, {}, 'sauvage-elixir']]) {
+    assert.equal(engine.recommend(preferences, { ownedIds: malformed, collectionOnly: true }).status, 'noMatch');
+    assert.deepEqual(engine.recommend(preferences, { ownedIds: malformed }), engine.recommend(preferences));
+  }
+  assert.equal(engine.recommend(preferences, { ownedIds: ['sweet'], collectionOnly: true }).status, 'noMatch');
+});
+
+test('no-match relaxations never escape the ownership pool', () => {
+  const preferences = run({ op: 'setScale', scale: 'freshness', min: 5 });
+  const result = engine.recommend(preferences, { ownedIds: ['sweet'], collectionOnly: true });
+  assert.equal(result.status, 'noMatch');
+  assert.deepEqual(result.relaxations, [{ condition: 'min:freshness:5', matches: 1 }]);
+  const empty = engine.recommend(preferences, { ownedIds: [], collectionOnly: true });
+  assert.deepEqual(empty.relaxations, []);
+});
+
+test('engine similar applies ownership before ranking and limits', () => {
+  const preferences = emptyPreferences();
+  assert.ok(!ids(engine.similar('sauvage', { ownedIds: ['fresh-quiet'] })).includes('fresh-quiet'));
+  assert.deepEqual(ids(engine.similar('sauvage', { ownedIds: ['fresh-quiet'], collectionOnly: true })), ['fresh-quiet']);
+  assert.deepEqual(ids(engine.similar('sauvage', { ownedIds: ['invalid'], collectionOnly: true })), []);
+  assert.deepEqual(engine.rehydrate({ ...preferences, ownedIds: ['sweet'], collectionOnly: true }), preferences);
+});

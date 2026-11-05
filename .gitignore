@@ -6,3 +6,4 @@ wyniki/
 .next/
 next-env.d.ts
 .agent*
+.claude

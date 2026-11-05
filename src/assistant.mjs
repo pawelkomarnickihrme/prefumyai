@@ -91,6 +91,7 @@ export function createAssistant({ engine, dictionary, interpret, select, showIma
     return {
       language, message: extra.message ?? '', blocks: extra.blocks ?? [], warnings,
       actions: extra.actions ?? [], shownIds: extra.shownIds ?? [],
+      collectionOnly: extra.collectionOnly === true,
       preferences, summary: presentation.summarize(preferences, language),
     };
   }
@@ -106,11 +107,19 @@ export function createAssistant({ engine, dictionary, interpret, select, showIma
     };
   }
 
-  async function recommend(preferences, language, { text = '', warnings = [] }, signal) {
-    const result = engine.recommend(preferences);
+  function collectionMiss(preferences, language, empty, warnings = []) {
+    const message = language === 'en'
+      ? (empty ? 'Your collection is empty. Add perfumes to choose from your collection.' : 'No perfume in your collection matches these criteria. Your exclusions still apply.')
+      : (empty ? 'Twoja kolekcja jest pusta. Dodaj perfumy, aby wybrać coś z kolekcji.' : 'Żadne perfumy z Twojej kolekcji nie spełniają tych kryteriów. Twoje wykluczenia nadal obowiązują.');
+    return envelope(preferences, language, { collectionOnly: true, message, warnings });
+  }
+
+  async function recommend(preferences, language, { text = '', warnings = [], ...scope }, signal) {
+    const result = engine.recommend(preferences, scope);
     const allWarnings = [...warnings, ...result.warnings];
     if (isBudgetSet(preferences)) allWarnings.push({ type: 'budget' });
     if (result.status === 'noMatch') {
+      if (scope.collectionOnly) return collectionMiss(preferences, language, !scope.ownedIds.length, allWarnings);
       const options = result.relaxations.map(r => presentation.relaxationOption(r.condition, preferences, language)).filter(Boolean);
       return envelope(preferences, language, { warnings: allWarnings, blocks: [{ type: 'noMatch', options }] });
     }
@@ -143,6 +152,7 @@ export function createAssistant({ engine, dictionary, interpret, select, showIma
         pick.tradeoff || presentation.fallbackTradeoff(candidate, language));
     });
     return envelope(preferences, language, {
+      collectionOnly: scope.collectionOnly,
       message: t(language, 'results'), warnings: allWarnings,
       blocks: [{ type: 'recommendations', cards }],
       actions: ['lessSweet', 'moreDiscreet'].map(action => ({ action, label: t(language, action) })),
@@ -160,12 +170,18 @@ export function createAssistant({ engine, dictionary, interpret, select, showIma
     return ids;
   }
 
-  async function onMessage(body, preferences, language, signal) {
+  async function onMessage(body, preferences, language, scope, signal) {
     const text = clipText(body.text, MAX_TEXT);
-    if (!text) return envelope(preferences, language, { message: t(language, 'askMore') });
+    if (!text) return envelope(preferences, language, { collectionOnly: scope.collectionOnly, message: t(language, 'askMore') });
     const history = (Array.isArray(body.history) ? body.history : []).slice(-HISTORY)
       .map(m => ({ role: m?.role === 'assistant' ? 'assistant' : 'user', text: clipText(m?.text, 400) }));
-    const answer = await interpret({ currentPreferences: preferences, history, latestMessage: text }, signal);
+    const collection = scope.ownedIds.map(id => {
+      const entry = engine.getPerfume(id);
+      return { id, label: `${entry.brand} ${entry.name}` };
+    });
+    const answer = await interpret({ currentPreferences: preferences, history, latestMessage: text, collection }, signal);
+    // Only the intent flag is accepted from the model; ownership comes from the browser.
+    const requestScope = { ...scope, collectionOnly: scope.collectionOnly || answer?.collectionOnly === true };
     const replyLanguage = answer?.language === 'en' || answer?.language === 'pl' ? answer.language : language;
     const { operations, warnings } = toOperations(answer?.operations);
     const next = applyAll(preferences, operations);
@@ -175,64 +191,71 @@ export function createAssistant({ engine, dictionary, interpret, select, showIma
         .map(option => ({ label: clipText(option?.label, 60), operations: toOperations(option?.operations).operations }))
         .filter(option => option.label);
       if (options.length >= 2) {
-        return envelope(next, replyLanguage, { warnings, blocks: [{ type: 'question', text: clipText(answer.question.text, 200), options }] });
+        return envelope(next, replyLanguage, { collectionOnly: requestScope.collectionOnly, warnings, blocks: [{ type: 'question', text: clipText(answer.question.text, 200), options }] });
       }
     }
     if (answer?.intent === 'compare') {
       const ids = resolvePerfumes(answer.perfumes).slice(0, 3);
-      if (ids.length < 2) return envelope(next, replyLanguage, { message: t(replyLanguage, 'compareNeedsTwo'), warnings });
-      return envelope(next, replyLanguage, { warnings, blocks: [presentation.comparison(ids, replyLanguage)] });
+      if (ids.length < 2) return envelope(next, replyLanguage, { collectionOnly: requestScope.collectionOnly, message: t(replyLanguage, 'compareNeedsTwo'), warnings });
+      return envelope(next, replyLanguage, { collectionOnly: requestScope.collectionOnly, warnings, blocks: [presentation.comparison(ids, replyLanguage)] });
     }
     if (answer?.intent === 'details') {
       const [id] = resolvePerfumes(answer.perfumes);
-      if (!id) return envelope(next, replyLanguage, { message: t(replyLanguage, 'notFound'), warnings });
-      return envelope(next, replyLanguage, { warnings, ...presentation.details(engine.getPerfume(id), replyLanguage) });
+      if (!id) return envelope(next, replyLanguage, { collectionOnly: requestScope.collectionOnly, message: t(replyLanguage, 'notFound'), warnings });
+      return envelope(next, replyLanguage, { collectionOnly: requestScope.collectionOnly, warnings, ...presentation.details(engine.getPerfume(id), replyLanguage) });
     }
     if (answer?.intent === 'other' && !operations.length) {
-      return envelope(next, replyLanguage, { message: t(replyLanguage, 'offTopic'), warnings });
+      return envelope(next, replyLanguage, { collectionOnly: requestScope.collectionOnly, message: t(replyLanguage, 'offTopic'), warnings });
     }
-    if (!presentation.summarize(next, replyLanguage).length) {
-      return envelope(next, replyLanguage, { message: t(replyLanguage, 'askMore'), warnings });
+    if (!requestScope.collectionOnly && !presentation.summarize(next, replyLanguage).length) {
+      return envelope(next, replyLanguage, { collectionOnly: requestScope.collectionOnly, message: t(replyLanguage, 'askMore'), warnings });
     }
-    return recommend(next, replyLanguage, { text, warnings }, signal);
+    return recommend(next, replyLanguage, { text, warnings, ...requestScope }, signal);
   }
 
   async function handle(body, signal) {
     const preferences = engine.rehydrate(body.preferences);
     const language = languageOf(body.language);
+    const scope = {
+      ownedIds: [...new Set((Array.isArray(body.ownedIds) ? body.ownedIds : [])
+        .filter(id => typeof id === 'string' && engine.getPerfume(id)))],
+      collectionOnly: body.collectionOnly === true,
+    };
     switch (body.type) {
       case 'message':
-        return onMessage(body, preferences, language, signal);
+        if (scope.collectionOnly && !scope.ownedIds.length) return collectionMiss(preferences, language, true);
+        return onMessage(body, preferences, language, scope, signal);
       case 'operations': {
         const next = applyAll(preferences, Array.isArray(body.operations) ? body.operations : []);
-        if (!presentation.summarize(next, language).length) return envelope(next, language, { message: t(language, 'askMore') });
-        return recommend(next, language, {}, signal);
+        if (!scope.collectionOnly && !presentation.summarize(next, language).length) return envelope(next, language, { collectionOnly: scope.collectionOnly, message: t(language, 'askMore') });
+        return recommend(next, language, scope, signal);
       }
       case 'action': {
         let operation;
         try {
           operation = engine.actionToOperation(body.action, Array.isArray(body.shownIds) ? body.shownIds : [], body.perfumeId);
         } catch {
-          return envelope(preferences, language, { message: t(language, 'askMore') });
+          return envelope(preferences, language, { collectionOnly: scope.collectionOnly, message: t(language, 'askMore') });
         }
-        return recommend(applyAll(preferences, [operation]), language, {}, signal);
+        return recommend(applyAll(preferences, [operation]), language, scope, signal);
       }
       case 'similar':
-        return recommend(applyAll(preferences, [{ op: 'addReference', id: body.perfumeId, relation: 'like' }]), language, {}, signal);
+        return recommend(applyAll(preferences, [{ op: 'addReference', id: body.perfumeId, relation: 'like' }]), language, scope, signal);
       case 'details': {
         const entry = engine.getPerfume(body.perfumeId);
-        if (!entry) return envelope(preferences, language, { message: t(language, 'notFound') });
-        return envelope(preferences, language, presentation.details(entry, language));
+        if (!entry) return envelope(preferences, language, { collectionOnly: scope.collectionOnly, message: t(language, 'notFound') });
+        return envelope(preferences, language, { collectionOnly: scope.collectionOnly, ...presentation.details(entry, language) });
       }
       case 'compare': {
-        const ids = (Array.isArray(body.perfumeIds) ? body.perfumeIds : []).filter(id => engine.getPerfume(id)).slice(0, 3);
-        if (ids.length < 2) return envelope(preferences, language, { message: t(language, 'compareNeedsTwo') });
-        return envelope(preferences, language, { blocks: [presentation.comparison(ids, language)] });
+        const ids = [...new Set(Array.isArray(body.perfumeIds) ? body.perfumeIds : [])]
+          .filter(id => engine.getPerfume(id)).slice(0, MAX_PICKS);
+        if (ids.length < 2) return envelope(preferences, language, { collectionOnly: scope.collectionOnly, message: t(language, 'compareNeedsTwo') });
+        return envelope(preferences, language, { collectionOnly: scope.collectionOnly, blocks: [presentation.comparison(ids, language)] });
       }
       case 'summary':
-        return envelope(preferences, language);
+        return envelope(preferences, language, { collectionOnly: scope.collectionOnly });
       default:
-        return envelope(preferences, language, { message: t(language, 'askMore') });
+        return envelope(preferences, language, { collectionOnly: scope.collectionOnly, message: t(language, 'askMore') });
     }
   }
 

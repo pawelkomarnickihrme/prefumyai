@@ -121,6 +121,43 @@ export function createPresentation({ engine, dictionary, showImages = false }) {
     .map(option => word(language, CHOICE_WORDS[field][option]).toLowerCase())
     .join(', ') || t(language, 'noData');
 
+  const profileFor = (entry, language) => (language === 'en' ? entry.enrichment?.profileEn : entry.enrichment?.profilePl) ?? null;
+  const imageFor = entry => showImages ? entry.imageUrl ?? null : null;
+  const noteGroups = (entry, language) => ['top', 'heart', 'base'].map(key => ({
+    key, label: t(language, `${key}Notes`), value: noteList(entry.notes[key], language) || t(language, 'noData'),
+  }));
+  const scaleGroups = (values, language) => Object.keys(SCALE_WORDS).map(key => ({
+    key, label: scaleName(key, language), value: values?.[key] ?? null,
+  }));
+
+  // Occasion/style tags are not olfactory facets; unknown values never become labels.
+  const nonOlfactoryTags = new Set(['daily-wear', 'office', 'evening', 'date-night', 'summer', 'winter', 'retro']);
+  function facetsFor(entry, language) {
+    const tags = [...new Set(Array.isArray(entry.enrichment?.tags) ? entry.enrichment.tags : [])]
+      .filter(key => Object.hasOwn(TAG_WORDS, key) && !nonOlfactoryTags.has(key));
+    const probability = key => {
+      const value = entry.enrichment?.tagProbabilities?.[key];
+      return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    };
+    // Stable sort keeps source order for ties; scores never introduce new tags.
+    tags.sort((a, b) => probability(b) - probability(a));
+    const keys = tags.length ? tags : [...new Set(entry.families ?? [])].filter(key => Object.hasOwn(FAMILIES, key));
+    return keys.slice(0, 4).map(key => ({ key, label: word(language, (tags.length ? TAG_WORDS : FAMILIES)[key]) }));
+  }
+
+  function wearFor(entry, language) {
+    return ['season', 'timeOfDay'].flatMap(key => {
+      const options = Object.keys(CHOICE_WORDS[key]).filter(option => {
+        const vote = entry.community?.[key]?.[option];
+        return typeof vote === 'number' && Number.isFinite(vote) && vote >= WEAR_SHARE;
+      });
+      return options.length ? [{
+        key, label: t(language, key === 'season' ? 'wearSeason' : 'wearTime'),
+        value: options.map(option => word(language, CHOICE_WORDS[key][option]).toLowerCase()).join(', '),
+      }] : [];
+    });
+  }
+
   function card(entry, language, why, tradeoff) {
     const notes = [['topNotes', entry.notes.top], ['heartNotes', entry.notes.heart], ['baseNotes', entry.notes.base]]
       .filter(([, list]) => list.length)
@@ -128,7 +165,13 @@ export function createPresentation({ engine, dictionary, showImages = false }) {
     const facts = [...notes, { label: t(language, 'wearSeason'), value: wear(entry, 'season', language) }, { label: t(language, 'wearTime'), value: wear(entry, 'timeOfDay', language) }];
     return {
       id: entry.id, name: entry.name, brand: entry.brand,
-      imageUrl: showImages ? entry.imageUrl : null,
+      imageUrl: imageFor(entry),
+      profile: profileFor(entry, language),
+      facets: facetsFor(entry, language), wear: wearFor(entry, language),
+      notes: noteGroups(entry, language),
+      scales: scaleGroups(entry.enrichment, language),
+      longevity: communityValue(entry.community?.longevity, language),
+      sillage: communityValue(entry.community?.sillage, language),
       facts, why, tradeoff,
     };
   }
@@ -138,28 +181,23 @@ export function createPresentation({ engine, dictionary, showImages = false }) {
     return voted ? word(language, COMMUNITY_WORDS[voted]) || voted : null;
   }
 
-  // A chat comment built only from catalog data, so the model cannot invent a detail.
+  // Structured details built only from catalog data, with no duplicate prose block.
   function details(entry, language) {
-    const noData = t(language, 'noData');
-    const notes = (label, list) => `${t(language, label)}: ${noteList(list, language) || noData}`;
-    const profile = language === 'en' ? entry.enrichment?.profileEn : entry.enrichment?.profilePl;
-    const scales = Object.keys(SCALE_WORDS)
-      .filter(scale => entry.enrichment?.[scale] != null)
-      .map(scale => `${scaleName(scale, language)} ${entry.enrichment[scale]} ${t(language, 'outOf')}`);
+    const profile = profileFor(entry, language);
     const segment = entry.enrichment ? word(language, SEGMENTS[entry.enrichment.priceSegment]) : '';
-    if (segment) scales.push(`${t(language, 'priceSegment')}: ${segment}`);
-    // Pros and cons have no Polish translation yet, so they are labeled as source text.
-    const source = language === 'en' ? '' : ` (${t(language, 'sourceLanguage').toLowerCase()})`;
-    const bullets = (label, list) => `${t(language, label)}${list.length ? `${source}:\n${list.slice(0, 5).map(item => `• ${item}`).join('\n')}` : `: ${noData}`}`;
-    const text = [
-      profile ?? noData,
-      [notes('topNotes', entry.notes.top), notes('heartNotes', entry.notes.heart), notes('baseNotes', entry.notes.base)].join('\n'),
-      scales.length ? `${t(language, 'estimated')}: ${scales.join(', ')}` : null,
-      `${t(language, 'community')}: ${t(language, 'longevity').toLowerCase()} – ${communityValue(entry.community?.longevity, language) ?? noData.toLowerCase()}, ${t(language, 'sillage').toLowerCase()} – ${communityValue(entry.community?.sillage, language) ?? noData.toLowerCase()}`,
-      bullets('pros', entry.pros),
-      bullets('cons', entry.cons),
-    ].filter(Boolean).join('\n\n');
-    return { message: `${entry.brand} ${entry.name}`, blocks: [{ type: 'comment', text }] };
+    const perfume = {
+      id: entry.id, brand: entry.brand, name: entry.name, imageUrl: imageFor(entry), profile,
+      facets: facetsFor(entry, language), wear: wearFor(entry, language),
+      notes: noteGroups(entry, language),
+      scales: scaleGroups(entry.enrichment, language),
+      longevity: communityValue(entry.community?.longevity, language),
+      sillage: communityValue(entry.community?.sillage, language),
+      season: wear(entry, 'season', language),
+      timeOfDay: wear(entry, 'timeOfDay', language),
+      priceSegment: segment || null,
+      pros: entry.pros, cons: entry.cons,
+    };
+    return { message: `${entry.brand} ${entry.name}`, blocks: [{ type: 'details', perfume }] };
   }
 
   function comparison(ids, language) {
@@ -168,12 +206,13 @@ export function createPresentation({ engine, dictionary, showImages = false }) {
       const entry = engine.getPerfume(item.id);
       return {
         id: item.id, name: entry.name, brand: entry.brand,
-        profile: (language === 'en' ? entry.enrichment?.profileEn : entry.enrichment?.profilePl) ?? null,
+        imageUrl: imageFor(entry),
+        profile: profileFor(entry, language),
         topNotes: noteList(entry.notes.top, language) || null,
         heartNotes: noteList(entry.notes.heart, language) || null,
         baseNotes: noteList(entry.notes.base, language) || null,
         uniqueNotes: item.uniqueNotes.map(n => noteName(n, language)),
-        scales: Object.keys(SCALE_WORDS).map(scale => ({ label: scaleName(scale, language), value: item.scales[scale] })),
+        scales: scaleGroups(item.scales, language),
         longevity: communityValue(entry.community?.longevity, language),
         sillage: communityValue(entry.community?.sillage, language),
         season: wear(entry, 'season', language),
